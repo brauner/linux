@@ -202,7 +202,7 @@ static struct dentry *afs_lookup_atcell(struct dentry *dentry)
 	if (!cell)
 		goto out_n;
 
-	ret = lookup_one_len(name, dentry->d_parent, len);
+	ret = lookup_one_len(&init_user_ns, name, dentry->d_parent, len);
 
 	/* We don't want to d_add() the @cell dentry here as we don't want to
 	 * the cached dentry to hide changes to the local cell name.
@@ -285,7 +285,7 @@ int afs_dynroot_mkdir(struct afs_net *net, struct afs_cell *cell)
 	/* Let the ->lookup op do the creation */
 	root = sb->s_root;
 	inode_lock(root->d_inode);
-	subdir = lookup_one_len(cell->name, root, cell->name_len);
+	subdir = lookup_one_len(&init_user_ns, cell->name, root, cell->name_len);
 	if (IS_ERR(subdir)) {
 		ret = PTR_ERR(subdir);
 		goto unlock;
@@ -315,7 +315,7 @@ void afs_dynroot_rmdir(struct afs_net *net, struct afs_cell *cell)
 	inode_lock(root->d_inode);
 
 	/* Don't want to trigger a lookup call, which will re-add the cell */
-	subdir = try_lookup_one_len(cell->name, root, cell->name_len);
+	subdir = try_lookup_one_len(&init_user_ns, cell->name, root, cell->name_len);
 	if (IS_ERR_OR_NULL(subdir)) {
 		_debug("lookup %ld", PTR_ERR(subdir));
 		goto no_dentry;

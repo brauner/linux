@@ -2495,8 +2495,9 @@ int vfs_path_lookup(struct dentry *dentry, struct vfsmount *mnt,
 }
 EXPORT_SYMBOL(vfs_path_lookup);
 
-static int lookup_one_len_common(const char *name, struct dentry *base,
-				 int len, struct qstr *this)
+static int lookup_one_len_common(struct user_namespace *user_ns,
+				 const char *name, struct dentry *base, int len,
+				 struct qstr *this)
 {
 	this->name = name;
 	this->len = len;
@@ -2524,11 +2525,12 @@ static int lookup_one_len_common(const char *name, struct dentry *base,
 			return err;
 	}
 
-	return inode_permission(&init_user_ns, base->d_inode, MAY_EXEC);
+	return inode_permission(user_ns, base->d_inode, MAY_EXEC);
 }
 
 /**
  * try_lookup_one_len - filesystem helper to lookup single pathname component
+ * @user_ns:	user namespace of the mount from which to lookup
  * @name:	pathname component to lookup
  * @base:	base directory to lookup from
  * @len:	maximum length @len should be interpreted to
@@ -2541,14 +2543,16 @@ static int lookup_one_len_common(const char *name, struct dentry *base,
  *
  * The caller must hold base->i_mutex.
  */
-struct dentry *try_lookup_one_len(const char *name, struct dentry *base, int len)
+struct dentry *try_lookup_one_len(struct user_namespace *user_ns,
+				  const char *name, struct dentry *base,
+				  int len)
 {
 	struct qstr this;
 	int err;
 
 	WARN_ON_ONCE(!inode_is_locked(base->d_inode));
 
-	err = lookup_one_len_common(name, base, len, &this);
+	err = lookup_one_len_common(user_ns, name, base, len, &this);
 	if (err)
 		return ERR_PTR(err);
 
@@ -2558,6 +2562,7 @@ EXPORT_SYMBOL(try_lookup_one_len);
 
 /**
  * lookup_one_len - filesystem helper to lookup single pathname component
+ * @user_ns:	user namespace of the mount from which to lookup
  * @name:	pathname component to lookup
  * @base:	base directory to lookup from
  * @len:	maximum length @len should be interpreted to
@@ -2567,7 +2572,8 @@ EXPORT_SYMBOL(try_lookup_one_len);
  *
  * The caller must hold base->i_mutex.
  */
-struct dentry *lookup_one_len(const char *name, struct dentry *base, int len)
+struct dentry *lookup_one_len(struct user_namespace *user_ns, const char *name,
+			      struct dentry *base, int len)
 {
 	struct dentry *dentry;
 	struct qstr this;
@@ -2575,7 +2581,7 @@ struct dentry *lookup_one_len(const char *name, struct dentry *base, int len)
 
 	WARN_ON_ONCE(!inode_is_locked(base->d_inode));
 
-	err = lookup_one_len_common(name, base, len, &this);
+	err = lookup_one_len_common(user_ns, name, base, len, &this);
 	if (err)
 		return ERR_PTR(err);
 
@@ -2586,6 +2592,7 @@ EXPORT_SYMBOL(lookup_one_len);
 
 /**
  * lookup_one_len_unlocked - filesystem helper to lookup single pathname component
+ * @user_ns:	user namespace of the mount from which to lookup
  * @name:	pathname component to lookup
  * @base:	base directory to lookup from
  * @len:	maximum length @len should be interpreted to
@@ -2596,14 +2603,15 @@ EXPORT_SYMBOL(lookup_one_len);
  * Unlike lookup_one_len, it should be called without the parent
  * i_mutex held, and will take the i_mutex itself if necessary.
  */
-struct dentry *lookup_one_len_unlocked(const char *name,
-				       struct dentry *base, int len)
+struct dentry *lookup_one_len_unlocked(struct user_namespace *user_ns,
+				       const char *name, struct dentry *base,
+				       int len)
 {
 	struct qstr this;
 	int err;
 	struct dentry *ret;
 
-	err = lookup_one_len_common(name, base, len, &this);
+	err = lookup_one_len_common(user_ns, name, base, len, &this);
 	if (err)
 		return ERR_PTR(err);
 
@@ -2622,10 +2630,10 @@ EXPORT_SYMBOL(lookup_one_len_unlocked);
  * need to be very careful; pinned positives have ->d_inode stable, so
  * this one avoids such problems.
  */
-struct dentry *lookup_positive_unlocked(const char *name,
-				       struct dentry *base, int len)
+struct dentry *lookup_positive_unlocked(struct user_namespace *user_ns,
+					const char *name, struct dentry *base, int len)
 {
-	struct dentry *ret = lookup_one_len_unlocked(name, base, len);
+	struct dentry *ret = lookup_one_len_unlocked(user_ns, name, base, len);
 	if (!IS_ERR(ret) && d_flags_negative(smp_load_acquire(&ret->d_flags))) {
 		dput(ret);
 		ret = ERR_PTR(-ENOENT);
