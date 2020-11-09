@@ -236,10 +236,10 @@ static inline int ovl_do_rename(struct inode *olddir,
 {
 	int err;
 	struct renamedata rd = {
-		.old_user_ns	= &init_user_ns,
+		.old_user_ns	= old_user_ns,
 		.old_dir 	= olddir,
 		.old_dentry 	= olddentry,
-		.new_user_ns	= &init_user_ns,
+		.new_user_ns	= new_user_ns,
 		.new_dir 	= newdir,
 		.new_dentry 	= newdentry,
 		.flags 		= flags,

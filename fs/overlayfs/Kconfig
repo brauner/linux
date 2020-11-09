@@ -124,3 +124,14 @@ config OVERLAY_FS_METACOPY
 	  that doesn't support this feature will have unexpected results.
 
 	  If unsure, say N.
+
+config OVERLAY_FS_IDMAP_MOUNTS
+	bool "Overlayfs: Support vfs idmapped mounts"
+	default n
+	depends on OVERLAY_FS
+	help
+	  The vfs allows to expose a filesystem at different mountpoints with
+	  differnet idmappings. Allow overlayfs to be exposed through idmapped
+	  mounts.
+
+	  If unsure, say N.

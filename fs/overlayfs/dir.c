@@ -624,7 +624,8 @@ out_revert_creds:
 	return err;
 }
 
-static int ovl_create_object(struct dentry *dentry, int mode, dev_t rdev,
+static int ovl_create_object(struct user_namespace *user_ns,
+			     struct dentry *dentry, int mode, dev_t rdev,
 			     const char *link)
 {
 	int err;
@@ -648,7 +649,7 @@ static int ovl_create_object(struct dentry *dentry, int mode, dev_t rdev,
 	inode->i_state |= I_CREATING;
 	spin_unlock(&inode->i_lock);
 
-	inode_init_owner(inode, &init_user_ns, dentry->d_parent->d_inode, mode);
+	inode_init_owner(inode, user_ns, dentry->d_parent->d_inode, mode);
 	attr.mode = inode->i_mode;
 
 	err = ovl_create_or_link(dentry, inode, &attr, false);
@@ -665,13 +666,13 @@ out:
 static int ovl_create(struct user_namespace *user_ns, struct inode *dir,
 		      struct dentry *dentry, umode_t mode, bool excl)
 {
-	return ovl_create_object(dentry, (mode & 07777) | S_IFREG, 0, NULL);
+	return ovl_create_object(user_ns, dentry, (mode & 07777) | S_IFREG, 0, NULL);
 }
 
 static int ovl_mkdir(struct user_namespace *user_ns, struct inode *dir,
 		     struct dentry *dentry, umode_t mode)
 {
-	return ovl_create_object(dentry, (mode & 07777) | S_IFDIR, 0, NULL);
+	return ovl_create_object(user_ns, dentry, (mode & 07777) | S_IFDIR, 0, NULL);
 }
 
 static int ovl_mknod(struct user_namespace *user_ns, struct inode *dir,
@@ -681,13 +682,13 @@ static int ovl_mknod(struct user_namespace *user_ns, struct inode *dir,
 	if (S_ISCHR(mode) && rdev == WHITEOUT_DEV)
 		return -EPERM;
 
-	return ovl_create_object(dentry, mode, rdev, NULL);
+	return ovl_create_object(user_ns, dentry, mode, rdev, NULL);
 }
 
 static int ovl_symlink(struct user_namespace *user_ns, struct inode *dir,
 		       struct dentry *dentry, const char *link)
 {
-	return ovl_create_object(dentry, S_IFLNK, 0, link);
+	return ovl_create_object(user_ns, dentry, S_IFLNK, 0, link);
 }
 
 static int ovl_set_link_redirect(struct dentry *dentry)

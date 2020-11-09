@@ -23,7 +23,7 @@ int ovl_setattr(struct user_namespace *user_ns, struct dentry *dentry,
 	struct dentry *upperdentry;
 	const struct cred *old_cred;
 
-	err = setattr_prepare(&init_user_ns, dentry, attr);
+	err = setattr_prepare(user_ns, dentry, attr);
 	if (err)
 		return err;
 
@@ -168,6 +168,7 @@ static int ovl_map_dev_ino(struct dentry *dentry, struct kstat *stat, int fsid)
 int ovl_getattr(const struct path *path, struct kstat *stat,
 		u32 request_mask, unsigned int flags)
 {
+	struct user_namespace *user_ns;
 	struct dentry *dentry = path->dentry;
 	enum ovl_path_type type;
 	struct path realpath;
@@ -285,6 +286,10 @@ int ovl_getattr(const struct path *path, struct kstat *stat,
 out:
 	revert_creds(old_cred);
 
+	user_ns = mnt_user_ns(path->mnt);
+	stat->uid = kuid_into_mnt(user_ns, stat->uid);
+	stat->gid = kgid_into_mnt(user_ns, stat->gid);
+
 	return err;
 }
 
@@ -311,7 +316,7 @@ int ovl_permission(struct user_namespace *user_ns, struct inode *inode, int mask
 	 * Check overlay inode with the creds of task and underlying inode
 	 * with creds of mounter
 	 */
-	err = generic_permission(&init_user_ns, inode, mask);
+	err = generic_permission(user_ns, inode, mask);
 	if (err)
 		return err;
 
