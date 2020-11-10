@@ -4,8 +4,16 @@
 #define __IDMAP_INTERNAL_H
 
 #define _GNU_SOURCE
-
-#include "../kselftest_harness.h"
+#include <errno.h>
+#include <linux/types.h>
+#include <sched.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <syscall.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #ifndef __NR_mount_setattr
 	#if defined __alpha__
@@ -71,7 +79,7 @@ struct mount_attr {
 	__u64 attr_set;
 	__u64 attr_clr;
 	__u64 propagation;
-	__u64 userns;
+	__u64 userns_fd;
 };
 #endif
 
@@ -79,8 +87,8 @@ struct mount_attr {
 #define MOVE_MOUNT_F_EMPTY_PATH 0x00000004 /* Empty from path permitted */
 #endif
 
-#ifndef MOUNT_ATTR_SHIFT
-#define MOUNT_ATTR_SHIFT 0x00100000
+#ifndef MOUNT_ATTR_IDMAP
+#define MOUNT_ATTR_IDMAP 0x00100000
 #endif
 
 #ifndef OPEN_TREE_CLONE
@@ -93,6 +101,10 @@ struct mount_attr {
 
 #ifndef AT_RECURSIVE
 #define AT_RECURSIVE 0x8000 /* Apply to the entire subtree */
+#endif
+
+#ifndef MAKE_PROPAGATION_PRIVATE
+#define MAKE_PROPAGATION_PRIVATE 2
 #endif
 
 static inline int sys_mount_setattr(int dfd, const char *path, unsigned int flags,
