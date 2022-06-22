@@ -2354,15 +2354,15 @@ EXPORT_SYMBOL(inode_init_owner);
 bool inode_owner_or_capable(struct user_namespace *mnt_userns,
 			    const struct inode *inode)
 {
-	kuid_t i_uid;
+	vfsuid_t vfsuid;
 	struct user_namespace *ns;
 
-	i_uid = i_uid_into_mnt(mnt_userns, inode);
-	if (uid_eq(current_fsuid(), i_uid))
+	vfsuid = i_uid_into_vfsuid(mnt_userns, inode);
+	if (vfsuid_eq_kuid(vfsuid, current_fsuid()))
 		return true;
 
 	ns = current_user_ns();
-	if (kuid_has_mapping(ns, i_uid) && ns_capable(ns, CAP_FOWNER))
+	if (vfsuid_has_mapping(ns, vfsuid) && ns_capable(ns, CAP_FOWNER))
 		return true;
 	return false;
 }
@@ -2508,7 +2508,7 @@ umode_t mode_strip_sgid(struct user_namespace *mnt_userns,
 		return mode;
 	if (S_ISDIR(mode) || !dir || !(dir->i_mode & S_ISGID))
 		return mode;
-	if (in_group_p(i_gid_into_mnt(mnt_userns, dir)))
+	if (vfsgid_in_group_p(i_gid_into_vfsgid(mnt_userns, dir)))
 		return mode;
 	if (capable_wrt_inode_uidgid(mnt_userns, dir, CAP_FSETID))
 		return mode;
