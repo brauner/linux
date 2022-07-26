@@ -589,7 +589,7 @@ int cap_convert_nscap(struct user_namespace *mnt_userns, struct dentry *dentry,
  * Calculate the new process capability sets from the capability sets attached
  * to a file.
  */
-static inline int bprm_caps_from_vfs_caps(struct cpu_vfs_cap_data *caps,
+static inline int bprm_caps_from_vfs_caps(struct vfs_caps *caps,
 					  struct linux_binprm *bprm,
 					  bool *effective,
 					  bool *has_fcap)
@@ -646,7 +646,7 @@ static inline int bprm_caps_from_vfs_caps(struct cpu_vfs_cap_data *caps,
  */
 int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 			   const struct dentry *dentry,
-			   struct cpu_vfs_cap_data *cpu_caps)
+			   struct vfs_caps *cpu_caps)
 {
 	struct inode *inode = d_backing_inode(dentry);
 	__u32 magic_etc;
@@ -657,7 +657,7 @@ int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 	kuid_t rootkuid;
 	struct user_namespace *fs_ns;
 
-	memset(cpu_caps, 0, sizeof(struct cpu_vfs_cap_data));
+	memset(cpu_caps, 0, sizeof(struct vfs_caps));
 
 	if (!inode)
 		return -ENODATA;
@@ -730,7 +730,7 @@ static int get_file_caps(struct linux_binprm *bprm, struct file *file,
 			 bool *effective, bool *has_fcap)
 {
 	int rc = 0;
-	struct cpu_vfs_cap_data vcaps;
+	struct vfs_caps vcaps;
 
 	cap_clear(bprm->cred->cap_permitted);
 
