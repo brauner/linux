@@ -381,6 +381,7 @@ int cap_inode_getsecurity(struct user_namespace *mnt_userns,
 {
 	int size, ret;
 	kuid_t kroot;
+	vfsuid_t vfsroot;
 	u32 nsmagic, magic;
 	uid_t root, mappedroot;
 	char *tmpbuf = NULL;
@@ -419,11 +420,11 @@ int cap_inode_getsecurity(struct user_namespace *mnt_userns,
 	kroot = make_kuid(fs_ns, root);
 
 	/* If this is an idmapped mount shift the kuid. */
-	kroot = mapped_kuid_fs(mnt_userns, fs_ns, kroot);
+	vfsroot = make_vfsuid(mnt_userns, fs_ns, kroot);
 
 	/* If the root kuid maps to a valid uid in current ns, then return
 	 * this as a nscap. */
-	mappedroot = from_kuid(current_user_ns(), kroot);
+	mappedroot = from_kuid(current_user_ns(), AS_KUIDT(vfsroot));
 	if (mappedroot != (uid_t)-1 && mappedroot != (uid_t)0) {
 		size = sizeof(struct vfs_ns_cap_data);
 		if (alloc) {
@@ -450,7 +451,7 @@ int cap_inode_getsecurity(struct user_namespace *mnt_userns,
 		goto out_free;
 	}
 
-	if (!rootid_owns_currentns(kroot)) {
+	if (!rootid_owns_currentns(AS_KUIDT(vfsroot))) {
 		size = -EOVERFLOW;
 		goto out_free;
 	}
@@ -655,6 +656,7 @@ int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 	struct vfs_ns_cap_data data, *nscaps = &data;
 	struct vfs_cap_data *caps = (struct vfs_cap_data *) &data;
 	kuid_t rootkuid;
+	vfsuid_t vfsroot;
 	struct user_namespace *fs_ns;
 
 	memset(cpu_caps, 0, sizeof(struct vfs_caps));
@@ -702,8 +704,8 @@ int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 	/* Limit the caps to the mounter of the filesystem
 	 * or the more limited uid specified in the xattr.
 	 */
-	rootkuid = mapped_kuid_fs(mnt_userns, fs_ns, rootkuid);
-	if (!rootid_owns_currentns(rootkuid))
+	vfsroot = make_vfsuid(mnt_userns, fs_ns, rootkuid);
+	if (!rootid_owns_currentns(AS_KUIDT(vfsroot)))
 		return -ENODATA;
 
 	CAP_FOR_EACH_U32(i) {
@@ -716,7 +718,7 @@ int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 	cpu_caps->permitted.cap[CAP_LAST_U32] &= CAP_LAST_U32_VALID_MASK;
 	cpu_caps->inheritable.cap[CAP_LAST_U32] &= CAP_LAST_U32_VALID_MASK;
 
-	cpu_caps->rootid = rootkuid;
+	cpu_caps->rootid = vfsroot;
 
 	return 0;
 }
