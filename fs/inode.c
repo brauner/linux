@@ -20,6 +20,7 @@
 #include <linux/ratelimit.h>
 #include <linux/list_lru.h>
 #include <linux/iversion.h>
+#include <linux/xattr.h>
 #include <trace/events/writeback.h>
 #include "internal.h"
 
@@ -1944,6 +1945,59 @@ skip_update:
 	sb_end_write(inode->i_sb);
 }
 EXPORT_SYMBOL(touch_atime);
+
+static int generic_get_fscaps(struct user_namespace *mnt_userns,
+			      struct dentry *dentry, struct vfs_caps *caps)
+{
+	struct inode *inode = d_inode(dentry);
+	struct vfs_ns_cap_data nscaps;
+	int size;
+
+	size = vfs_getxattr(mnt_userns, dentry, XATTR_NAME_CAPS, &nscaps,
+			    XATTR_CAPS_SZ);
+	if (size < 0)
+		return size;
+
+	return vfs_caps_from_xattr(mnt_userns, inode->i_sb->s_user_ns, caps,
+				   &nscaps, size);
+}
+
+/* XXX do we need to pass xattr flags? It's ugly but probably necessary ... */
+static int generic_set_fscaps(struct user_namespace *mnt_userns,
+			      struct dentry *dentry,
+			      const struct vfs_caps *caps, int flags)
+{
+	struct inode *inode = d_inode(dentry);
+	struct vfs_ns_cap_data nscaps;
+	int size;
+
+	size = vfs_caps_to_xattr(mnt_userns, inode->i_sb->s_user_ns, caps,
+				&nscaps, sizeof(nscaps));
+	if (size < 0)
+		return size;
+
+	return vfs_setxattr(mnt_userns, dentry, XATTR_NAME_CAPS, &nscaps, size, flags);
+}
+
+int vfs_get_fscaps(struct user_namespace *mnt_userns, struct dentry *dentry,
+		   struct vfs_caps *caps)
+{
+	struct inode *inode = d_inode(dentry);
+	if (inode->i_op->get_fscaps)
+		return inode->i_op->get_fscaps(mnt_userns, dentry, caps);
+	return generic_get_fscaps(mnt_userns, dentry, caps);
+}
+EXPORT_SYMBOL(vfs_get_fscaps);
+
+int vfs_set_fscaps(struct user_namespace *mnt_userns, struct dentry *dentry,
+		   const struct vfs_caps *caps, int flags)
+{
+	struct inode *inode = d_inode(dentry);
+	if (inode->i_op->set_fscaps)
+		return inode->i_op->set_fscaps(mnt_userns, dentry, caps, flags);
+	return generic_set_fscaps(mnt_userns, dentry, caps, flags);
+}
+EXPORT_SYMBOL(vfs_set_fscaps);
 
 /*
  * The logic we want is

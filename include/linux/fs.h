@@ -2169,6 +2169,10 @@ struct inode_operations {
 			struct dentry *, umode_t);
 	int (*set_acl)(struct user_namespace *, struct inode *,
 		       struct posix_acl *, int);
+	int (*get_fscaps)(struct user_namespace *, struct dentry *,
+			  struct vfs_caps *);
+	int (*set_fscaps)(struct user_namespace *, struct dentry *,
+			  const struct vfs_caps *, int flags);
 	int (*fileattr_set)(struct user_namespace *mnt_userns,
 			    struct dentry *dentry, struct fileattr *fa);
 	int (*fileattr_get)(struct dentry *dentry, struct fileattr *fa);
@@ -2213,6 +2217,11 @@ extern int vfs_dedupe_file_range(struct file *file,
 extern loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 					struct file *dst_file, loff_t dst_pos,
 					loff_t len, unsigned int remap_flags);
+extern int vfs_get_fscaps(struct user_namespace *mnt_userns,
+			  struct dentry *dentry, struct vfs_caps *caps);
+extern int vfs_set_fscaps(struct user_namespace *mnt_userns,
+			  struct dentry *dentry, const struct vfs_caps *caps,
+			  int flags);
 
 
 struct super_operations {
