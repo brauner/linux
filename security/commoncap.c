@@ -630,6 +630,113 @@ static inline int bprm_caps_from_vfs_caps(struct vfs_caps *caps,
 	return *effective ? ret : 0;
 }
 
+int vfs_caps_from_xattr(struct user_namespace *mnt_userns,
+			struct user_namespace *src_userns,
+			struct vfs_caps *vfs_caps,
+			const void *data, int size)
+{
+	__u32 magic_etc;
+	const struct vfs_ns_cap_data *ns_caps = data;
+	struct vfs_cap_data *caps = (struct vfs_cap_data *)ns_caps;
+	unsigned tocopy, i;
+	kuid_t rootkuid;
+
+	memset(vfs_caps, 0, sizeof(*vfs_caps));
+
+	if (size < sizeof(magic_etc))
+		return -ERANGE;
+
+	vfs_caps->magic_etc = magic_etc = le32_to_cpu(caps->magic_etc);
+
+	rootkuid = make_kuid(src_userns, 0);
+	switch (magic_etc & VFS_CAP_REVISION_MASK) {
+	case VFS_CAP_REVISION_1:
+		if (size != XATTR_CAPS_SZ_1)
+			return -ERANGE;
+		tocopy = VFS_CAP_U32_1;
+		break;
+	case VFS_CAP_REVISION_2:
+		if (size != XATTR_CAPS_SZ_2)
+			return -ERANGE;
+		tocopy = VFS_CAP_U32_2;
+		break;
+	case VFS_CAP_REVISION_3:
+		if (size != XATTR_CAPS_SZ_3)
+			return -ERANGE;
+		tocopy = VFS_CAP_U32_3;
+		rootkuid = make_kuid(src_userns, le32_to_cpu(ns_caps->rootid));
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	vfs_caps->rootid = make_vfsuid(mnt_userns, src_userns, rootkuid);
+
+	CAP_FOR_EACH_U32(i) {
+		if (i >= tocopy)
+			break;
+		vfs_caps->permitted.cap[i] = le32_to_cpu(caps->data[i].permitted);
+		vfs_caps->inheritable.cap[i] = le32_to_cpu(caps->data[i].inheritable);
+	}
+
+	return 0;
+}
+
+int vfs_caps_to_xattr(struct user_namespace *mnt_userns,
+		      struct user_namespace *dest_userns,
+		      const struct vfs_caps *vfs_caps,
+		      void *data, int size)
+{
+	unsigned tocopy, i;
+	struct vfs_ns_cap_data *ns_caps = data;
+	struct vfs_cap_data *caps = (struct vfs_cap_data *)ns_caps;
+	kuid_t rootkuid;
+	uid_t rootid;
+
+	rootid = 0;
+	switch (vfs_caps->magic_etc & VFS_CAP_REVISION_MASK) {
+	case VFS_CAP_REVISION_1:
+		if (size < XATTR_CAPS_SZ_1)
+			return -ERANGE;
+		size = XATTR_CAPS_SZ_1;
+		tocopy = VFS_CAP_U32_1;
+		break;
+	case VFS_CAP_REVISION_2:
+		if (size < XATTR_CAPS_SZ_2)
+			return -ERANGE;
+		size = XATTR_CAPS_SZ_2;
+		tocopy = VFS_CAP_U32_2;
+		break;
+	case VFS_CAP_REVISION_3:
+		if (size < XATTR_CAPS_SZ_3)
+			return -ERANGE;
+		size = XATTR_CAPS_SZ_3;
+		tocopy = VFS_CAP_U32_3;
+		rootkuid = from_vfsuid(mnt_userns, dest_userns, vfs_caps->rootid);
+		rootid = from_kuid(dest_userns, rootkuid);
+		if (rootid == (uid_t)-1)
+			return -EOVERFLOW;
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	memset(ns_caps, 0, size);
+	caps->magic_etc = cpu_to_le32(vfs_caps->magic_etc);
+	ns_caps->rootid = cpu_to_le32(rootid);
+
+	CAP_FOR_EACH_U32(i) {
+		if (i >= tocopy)
+			break;
+		caps->data[i].permitted = cpu_to_le32(vfs_caps->permitted.cap[i]);
+		caps->data[i].inheritable = cpu_to_le32(vfs_caps->inheritable.cap[i]);
+	}
+
+	return size;
+}
+
 /**
  * get_vfs_caps_from_disk - retrieve vfs caps from disk
  *
@@ -650,21 +757,14 @@ int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 			   struct vfs_caps *cpu_caps)
 {
 	struct inode *inode = d_backing_inode(dentry);
-	__u32 magic_etc;
-	unsigned tocopy, i;
-	int size;
+	int size, ret;
 	struct vfs_ns_cap_data data, *nscaps = &data;
-	struct vfs_cap_data *caps = (struct vfs_cap_data *) &data;
-	kuid_t rootkuid;
-	vfsuid_t vfsroot;
-	struct user_namespace *fs_ns;
 
 	memset(cpu_caps, 0, sizeof(struct vfs_caps));
 
 	if (!inode)
 		return -ENODATA;
 
-	fs_ns = inode->i_sb->s_user_ns;
 	size = __vfs_getxattr((struct dentry *)dentry, inode,
 			      XATTR_NAME_CAPS, &data, XATTR_CAPS_SZ);
 	if (size == -ENODATA || size == -EOPNOTSUPP)
@@ -674,51 +774,19 @@ int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 	if (size < 0)
 		return size;
 
-	if (size < sizeof(magic_etc))
-		return -EINVAL;
+	ret = vfs_caps_from_xattr(mnt_userns, inode->i_sb->s_user_ns,
+				  cpu_caps, nscaps, size);
+	if (ret)
+		return ret;
 
-	cpu_caps->magic_etc = magic_etc = le32_to_cpu(caps->magic_etc);
-
-	rootkuid = make_kuid(fs_ns, 0);
-	switch (magic_etc & VFS_CAP_REVISION_MASK) {
-	case VFS_CAP_REVISION_1:
-		if (size != XATTR_CAPS_SZ_1)
-			return -EINVAL;
-		tocopy = VFS_CAP_U32_1;
-		break;
-	case VFS_CAP_REVISION_2:
-		if (size != XATTR_CAPS_SZ_2)
-			return -EINVAL;
-		tocopy = VFS_CAP_U32_2;
-		break;
-	case VFS_CAP_REVISION_3:
-		if (size != XATTR_CAPS_SZ_3)
-			return -EINVAL;
-		tocopy = VFS_CAP_U32_3;
-		rootkuid = make_kuid(fs_ns, le32_to_cpu(nscaps->rootid));
-		break;
-
-	default:
-		return -EINVAL;
-	}
 	/* Limit the caps to the mounter of the filesystem
 	 * or the more limited uid specified in the xattr.
 	 */
-	vfsroot = make_vfsuid(mnt_userns, fs_ns, rootkuid);
-	if (!rootid_owns_currentns(AS_KUIDT(vfsroot)))
+	if (!rootid_owns_currentns(AS_KUIDT(cpu_caps->rootid)))
 		return -ENODATA;
-
-	CAP_FOR_EACH_U32(i) {
-		if (i >= tocopy)
-			break;
-		cpu_caps->permitted.cap[i] = le32_to_cpu(caps->data[i].permitted);
-		cpu_caps->inheritable.cap[i] = le32_to_cpu(caps->data[i].inheritable);
-	}
 
 	cpu_caps->permitted.cap[CAP_LAST_U32] &= CAP_LAST_U32_VALID_MASK;
 	cpu_caps->inheritable.cap[CAP_LAST_U32] &= CAP_LAST_U32_VALID_MASK;
-
-	cpu_caps->rootid = vfsroot;
 
 	return 0;
 }
