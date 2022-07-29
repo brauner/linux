@@ -291,13 +291,6 @@ vfs_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 	const void  *orig_value = value;
 	int error;
 
-	if (size && strcmp(name, XATTR_NAME_CAPS) == 0) {
-		error = cap_convert_nscap(mnt_userns, dentry, &value, size);
-		if (error < 0)
-			return error;
-		size = error;
-	}
-
 retry_deleg:
 	inode_lock(inode);
 	error = __vfs_setxattr_locked(mnt_userns, dentry, name, value, size,
@@ -584,6 +577,24 @@ static void setxattr_convert(struct user_namespace *mnt_userns,
 int do_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
 		struct xattr_ctx *ctx)
 {
+	if (strcmp(ctx->kname->name, XATTR_NAME_CAPS) == 0) {
+		struct vfs_caps caps;
+		int ret;
+
+		/*
+		 * The id from userspace are already in mnt_users, so pass
+		 * init_user_ns instead so that it won't be mapped.
+		 */
+		ret = vfs_caps_from_xattr(&init_user_ns, current_user_ns(),
+					  &caps, ctx->kvalue, ctx->size);
+		if (ret)
+			return ret;
+		ret = cap_convert_nscap(mnt_userns, dentry, &caps);
+		if (ret)
+			return ret;
+		return vfs_set_fscaps(mnt_userns, dentry, &caps, ctx->flags);
+	}
+
 	setxattr_convert(mnt_userns, dentry, ctx);
 	return vfs_setxattr(mnt_userns, dentry, ctx->kname->name,
 			ctx->kvalue, ctx->size, ctx->flags);
@@ -682,6 +693,29 @@ do_getxattr(struct user_namespace *mnt_userns, struct dentry *d,
 {
 	ssize_t error;
 	char *kname = ctx->kname->name;
+
+	if (strcmp(kname, XATTR_NAME_CAPS) == 0) {
+		struct vfs_caps caps;
+		struct vfs_ns_cap_data data;
+		int ret;
+
+		error = vfs_get_fscaps(mnt_userns, d, &caps);
+		if (error < 0)
+			return error;
+		if (error > ctx->size)
+			return -ERANGE;
+		/*
+		 * rootid is already in mnt_userns, so pass init_user_ns so
+		 * that it won't be mapped.
+		 */
+		ret = vfs_caps_to_xattr(&init_user_ns, current_user_ns(), &caps,
+					&data, ctx->size);
+		if (ret)
+			return ret;
+		if (ctx->size && copy_to_user(ctx->value, &data, error))
+			return -EFAULT;
+		return error;
+	}
 
 	if (ctx->size) {
 		if (ctx->size > XATTR_SIZE_MAX)

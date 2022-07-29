@@ -287,6 +287,6 @@ int get_vfs_caps_from_disk(struct user_namespace *mnt_userns,
 			   struct vfs_caps *cpu_caps);
 
 int cap_convert_nscap(struct user_namespace *mnt_userns, struct dentry *dentry,
-		      const void **ivalue, size_t size);
+		      struct vfs_caps *caps);
 
 #endif /* !_LINUX_CAPABILITY_H */
