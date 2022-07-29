@@ -473,6 +473,55 @@ struct posix_acl *ovl_get_acl(struct inode *inode, int type, bool rcu)
 	return acl;
 }
 
+static int ovl_get_fscaps(struct user_namespace *mnt_userns,
+			  struct dentry *dentry, struct vfs_caps *caps)
+{
+	int err;
+	const struct cred *old_cred;
+	struct path realpath;
+
+	ovl_i_path_real(inode, &realpath);
+	old_cred = ovl_override_creds(dentry->d_sb);
+	err = vfs_get_fscaps(mnt_user_ns(realpath.mnt), realdentry, caps);
+	revert_creds(old_cred);
+	return err;
+}
+
+static int ovl_set_fscaps(struct user_namespace *mnt_userns,
+			  struct dentry *dentry, const struct vfs_caps *,
+			  int flags)
+{
+	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
+	struct dentry *upperdentry = ovl_i_dentry_upper(inode);
+	struct dentry *realdentry = upperdentry ?: ovl_dentry_lower(dentry);
+	struct path realpath;
+	const struct cred *old_cred;
+
+	err = ovl_want_write(dentry);
+	if (err)
+		goto out;
+
+	if (!upperdentry) {
+		err = ovl_copy_up(dentry);
+		if (err)
+			goto out_drop_write;
+
+		realdentry = ovl_dentry_upper(dentry);
+	}
+
+	old_cred = ovl_override_creds(dentry->d_sb);
+	ret = vfs_set_fscaps(ovl_upper_mnt_userns(ofs), realdentry, caps, flags);
+	revert_creds(old_cred);
+
+	/* copy c/mtime */
+	ovl_copyattr(indoe);
+
+out_drop_write:
+	ovl_drop_write(dentry);
+out:
+	return err;
+}
+
 int ovl_update_time(struct inode *inode, struct timespec64 *ts, int flags)
 {
 	if (flags & S_ATIME) {
@@ -646,6 +695,8 @@ static const struct inode_operations ovl_file_inode_operations = {
 	.getattr	= ovl_getattr,
 	.listxattr	= ovl_listxattr,
 	.get_acl	= ovl_get_acl,
+	.get_fscaps	= ovl_get_fscaps,
+	.set_fscaps	= ovl_set_fscaps,
 	.update_time	= ovl_update_time,
 	.fiemap		= ovl_fiemap,
 	.fileattr_get	= ovl_fileattr_get,
