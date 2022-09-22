@@ -1,0 +1,24 @@
+To: linux-fsdevel@vger.kernel.org
+Cc: Seth Forshee <sforshee@kernel.org>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Mimi Zohar <zohar@linux.ibm.com>
+Cc: linux-integrity@vger.kernel.org
+Cc: linux-security-module@vger.kernel.org
+/* v2 */
+unchanged
+
+/* v3 */
+Paul Moore <paul@paul-moore.com>:
+- Add get, and remove acl hook
+
+/* v4 */
+unchanged
+
+/* v5 */
+Paul Moore <paul@paul-moore.com>:
+- Move ifdef out of function body.
+
+Mimi Zohar <zohar@linux.ibm.com>:
+- Fix details in commit message.
+- Add more details to kernel-doc for evm_inode_set_acl().
