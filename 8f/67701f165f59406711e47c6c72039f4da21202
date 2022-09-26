@@ -10,3 +10,5 @@ Cc: v9fs-developer@lists.sourceforge.net
 Cc: linux-security-module@vger.kernel.org
 
 /* v2 */
+Al Viro <viro@zeniv.linux.org.uk>:
+- Simplify v9fs_iop_get_acl().
