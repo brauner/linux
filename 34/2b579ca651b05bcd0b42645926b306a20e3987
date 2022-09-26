@@ -12,3 +12,4 @@ Cc: linux-security-module@vger.kernel.org
 /* v2 */
 Al Viro <viro@zeniv.linux.org.uk>:
 - Simplify v9fs_iop_get_acl().
+- Simplify v9fs_fid_get_acl() and associated callers.
