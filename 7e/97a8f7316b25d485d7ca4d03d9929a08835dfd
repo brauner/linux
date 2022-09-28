@@ -8,3 +8,7 @@ Cc: linux-security-module@vger.kernel.org
 
 /* v2 */
 unchanged
+
+/* v3 */
+Reviewed-by: Paul Moore <paul@paul-moore.com>
+Acked-by: Casey Schaufler <casey@schaufler-ca.com>
