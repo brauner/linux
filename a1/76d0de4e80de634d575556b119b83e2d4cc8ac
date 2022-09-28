@@ -11,3 +11,6 @@ Cc: linux-security-module@vger.kernel.org
 
 /* v2 */
 unchanged
+
+/* v3 */
+Acked-by: Paul Moore <paul@paul-moore.com>
