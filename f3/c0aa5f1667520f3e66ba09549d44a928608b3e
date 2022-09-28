@@ -8,3 +8,7 @@ Cc: linux-security-module@vger.kernel.org
 
 /* v2 */
 unchanged
+
+/* v3 */
+Paul Moore <paul@paul-moore.com>:
+- Remove evm_xattr_acl_change() completely.
