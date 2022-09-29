@@ -3,7 +3,6 @@ Cc: Seth Forshee <sforshee@kernel.org>
 Cc: Christoph Hellwig <hch@lst.de>
 Cc: Al Viro <viro@zeniv.linux.org.uk>
 Cc: linux-security-module@vger.kernel.org
-
 /* v2 */
 unchanged
 
