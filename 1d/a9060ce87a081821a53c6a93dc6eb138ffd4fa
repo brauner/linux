@@ -8,7 +8,6 @@ Cc: Dominique Martinet <asmadeus@codewreck.org>
 Cc: Christian Schoenebeck <linux_oss@crudebyte.com>
 Cc: v9fs-developer@lists.sourceforge.net
 Cc: linux-security-module@vger.kernel.org
-
 /* v2 */
 Al Viro <viro@zeniv.linux.org.uk>:
 - Simplify v9fs_iop_get_acl().
