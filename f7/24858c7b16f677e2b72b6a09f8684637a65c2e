@@ -13,3 +13,5 @@ unchanged
 unchanged
 
 /* v4 */
+Christoph Hellwig <hch@lst.de>:
+- s/EXPORT_SYMBOL/EXPORT_SYMBOL_GPL/
