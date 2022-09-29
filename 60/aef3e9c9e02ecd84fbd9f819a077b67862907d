@@ -10,7 +10,6 @@ Cc: Hyunchul Lee <hyc.lee@gmail.com>
 Cc: Sergey Senozhatsky <senozhatsky@chromium.org>
 Cc: linux-cifs@vger.kernel.org
 Cc: linux-security-module@vger.kernel.org
-
 /* v2 */
 Christian Brauner (Microsoft) <brauner@kernel.org>:
 - Surface acl error in all cases.
