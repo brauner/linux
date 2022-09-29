@@ -5,7 +5,6 @@ Cc: Al Viro <viro@zeniv.linux.org.uk>
 Cc: Tyler Hicks <code@tyhicks.com>
 Cc: ecryptfs@vger.kernel.org
 Cc: linux-security-module@vger.kernel.org
-
 /* v2 */
 unchanged
 
