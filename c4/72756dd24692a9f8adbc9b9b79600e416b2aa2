@@ -6,7 +6,6 @@ Cc: Miklos Szeredi <miklos@szeredi.hu>
 Cc: Amir Goldstein <amir73il@gmail.com>
 Cc: linux-unionfs@vger.kernel.org
 Cc: linux-security-module@vger.kernel.org
-
 /* v2 */
 Miklos Szeredi <mszeredi@redhat.com>
 - Use IS_ERR_OR_NULL() macro.
