@@ -6,7 +6,6 @@ Cc: Paul Moore <paul@paul-moore.com>
 Cc: James Morris <jmorris@namei.org>
 Cc: "Serge E. Hallyn" <serge@hallyn.com>
 Cc: linux-security-module@vger.kernel.org
-
 /* v2 */
 unchanged
 
