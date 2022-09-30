@@ -12,3 +12,6 @@ patch not present
 /* v4 */
 Christoph Hellwig <hch@lst.de>:
 - Split out checks whether an inode can have xattrs written to into a helper.
+
+/* v5 */
+unchanged
