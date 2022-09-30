@@ -14,3 +14,7 @@ Paul Moore <paul@paul-moore.com>:
 
 /* v4 */
 Reviewed-by: Casey Schaufler <casey@schaufler-ca.com>
+
+/* v5 */
+Paul Moore <paul@paul-moore.com>:
+- Add whitespace between set_field and curacc calls for consistency.
