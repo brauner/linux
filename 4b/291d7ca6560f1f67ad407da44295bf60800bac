@@ -17,3 +17,8 @@ Paul Moore <paul@paul-moore.com>:
 
 /* v4 */
 unchanged
+
+/* v5 */
+Paul Moore <paul@paul-moore.com>:
+- Use current_cred() directly in dentry_has_perm() call in
+  selinux_inode_get_acl().
