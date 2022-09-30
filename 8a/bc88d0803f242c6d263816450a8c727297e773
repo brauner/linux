@@ -19,6 +19,8 @@ Paul Moore <paul@paul-moore.com>:
 unchanged
 
 /* v5 */
+Acked-by: Paul Moore <paul@paul-moore.com>
+
 Paul Moore <paul@paul-moore.com>:
 - Use current_cred() directly in dentry_has_perm() call in
   selinux_inode_get_acl().
