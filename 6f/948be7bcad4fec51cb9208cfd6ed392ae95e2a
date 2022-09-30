@@ -21,3 +21,4 @@ Paul Moore <paul@paul-moore.com>:
 
 Mimi Zohar <zohar@linux.ibm.com>:
 - Fix details in commit message.
+- Add more details to kernel-doc for evm_inode_set_acl().
