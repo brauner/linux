@@ -13,3 +13,6 @@ unchanged
 Christoph Hellwig <hch@lst.de>:
 - s/EXPORT_SYMBOL/EXPORT_SYMBOL_GPL/
 - return -EOPNOTSUPP from vfs_set_acl() if !CONFIG_FS_POSIX_ACL
+
+/* v5 */
+unchanged
