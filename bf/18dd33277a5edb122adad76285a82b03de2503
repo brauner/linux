@@ -18,3 +18,6 @@ unchanged
 /* v5 */
 Paul Moore <paul@paul-moore.com>:
 - Move ifdef out of function body.
+
+Mimi Zohar <zohar@linux.ibm.com>:
+- Fix details in commit message.
