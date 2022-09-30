@@ -13,3 +13,6 @@ unchanged
 /* v4 */
 Christoph Hellwig <hch@lst.de>:
 - drop extern from function declaration
+
+/* v5 */
+unchanged
