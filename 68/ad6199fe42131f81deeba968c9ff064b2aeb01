@@ -17,4 +17,7 @@ unchanged
 unchanged
 
 /* v5 */
-unchanged
+Miklos Szeredi <miklos@szeredi.hu>:
+- Consolidate get acl methods into one.
+- Add comment why we temporarily implement two instead of one because we are
+  skipping permission checks on accident for a long time.
