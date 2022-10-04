@@ -1,0 +1,23 @@
+To: linux-fsdevel@vger.kernel.org
+Cc: Seth Forshee <sforshee@kernel.org>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Eric Van Hensbergen <ericvh@gmail.com>
+Cc: Latchesar Ionkov <lucho@ionkov.net>
+Cc: Dominique Martinet <asmadeus@codewreck.org>
+Cc: Christian Schoenebeck <linux_oss@crudebyte.com>
+Cc: v9fs-developer@lists.sourceforge.net
+Cc: linux-security-module@vger.kernel.org
+/* v2 */
+Al Viro <viro@zeniv.linux.org.uk>:
+- Simplify v9fs_iop_get_acl().
+- Simplify v9fs_fid_get_acl() and associated callers.
+
+/* v3 */
+unchanged
+
+/* v4 */
+unchanged
+
+/* v5 */
+unchanged
