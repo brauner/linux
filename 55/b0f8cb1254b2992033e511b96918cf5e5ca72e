@@ -1,0 +1,17 @@
+To: linux-fsdevel@vger.kernel.org
+Cc: Seth Forshee <sforshee@kernel.org>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: linux-security-module@vger.kernel.org
+/* v2 */
+patch not present
+
+/* v3 */
+patch not present
+
+/* v4 */
+Christoph Hellwig <hch@lst.de>:
+- Split out checks whether an inode can have xattrs written to into a helper.
+
+/* v5 */
+unchanged
