@@ -10,4 +10,5 @@ Cc: Christian Brauner <brauner@kernel.org>
 Cc: linux-unionfs@vger.kernel.org
 Cc: linux-fsdevel@vger.kernel.org
 /* v2 */
-patch added
+Dave Chinner <dchinner@redhat.com>:
+- Use easier to follow logic in the new helper.
