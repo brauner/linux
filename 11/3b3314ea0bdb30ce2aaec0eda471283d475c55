@@ -1,0 +1,14 @@
+To: Amir Goldstein <amir73il@gmail.com>
+To: Miklos Szeredi <miklos@szeredi.hu>
+To: "Darrick J . Wong" <djwong@kernel.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Seth Forshee (DigitalOcean) <sforshee@kernel.org>
+Cc: Yang Xu <xuyang2018.jy@fujitsu.com>
+Cc: Filipe Manana <fdmanana@kernel.org>
+Cc: Christian Brauner <brauner@kernel.org>
+Cc: linux-unionfs@vger.kernel.org
+Cc: linux-fsdevel@vger.kernel.org
+/* v2 */
+Dave Chinner <dchinner@redhat.com>:
+- Use easier to follow logic in the new helper.
