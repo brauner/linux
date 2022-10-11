@@ -11,3 +11,8 @@ Cc: linux-unionfs@vger.kernel.org
 Cc: linux-fsdevel@vger.kernel.org
 /* v2 */
 patch added
+
+TODO:
+
+- Move should_remove_suid() helper from inode.c to attr.c where it belongs.
+- Rename setattr_drop_sgid() to setattr_should_drop_sgid().
