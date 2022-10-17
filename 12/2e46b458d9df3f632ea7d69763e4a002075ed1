@@ -25,3 +25,9 @@ Christian Brauner <brauner@kernel.org>:
   attr flags.
 - Since setattr_should_drop_suidgid() only needs the inode pass an inode,
   not a dentry.
+
+/* v4 */
+Amir Goldstein <amir73il@gmail.com>:
+- Remove double sign-off.
+- Call and store return value of setattr_should_drop_sgid() directly in
+  setattr_should_drop_suidgid().
