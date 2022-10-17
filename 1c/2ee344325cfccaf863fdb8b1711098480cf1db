@@ -15,3 +15,8 @@ patch added
 /* v3 */
 Amir Goldstein <amir73il@gmail.com>:
 - Return 0 or ATTR_KILL_SGID to make all dropping helpers behave similarly.
+
+/* v4 */
+Christian Brauner <brauner@kernel.org>:
+- Rename helper to in_group_or_capable() and use it in mode_strip_sgid() as
+  well getting rid of the code duplication.
