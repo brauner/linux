@@ -15,3 +15,13 @@ Amir Goldstein <amir73il@gmail.com>:
 
 Christian Brauner <brauner@kernel.org>:
 - Use should_remove_sgid() in chown_common() just like we do in do_truncate().
+
+/* v3 */
+Christian Brauner <brauner@kernel.org>:
+- Move should_remove_suid() from inode.c to attr.c where it belongs with the
+  rest of the iattr helpers. Especially since it returns ATTR_KILL_S{G,U}ID
+  flags. We also rename it to setattr_should_drop_suidgid() to better reflect
+  that it indicates both setuid and setgid bit removal and also that it returns
+  attr flags.
+- Since setattr_should_drop_suidgid() only needs the inode pass an inode,
+  not a dentry.
