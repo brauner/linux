@@ -1,0 +1,41 @@
+To: Amir Goldstein <amir73il@gmail.com>
+To: Miklos Szeredi <miklos@szeredi.hu>
+To: "Darrick J . Wong" <djwong@kernel.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Seth Forshee (DigitalOcean) <sforshee@kernel.org>
+Cc: Yang Xu <xuyang2018.jy@fujitsu.com>
+Cc: Filipe Manana <fdmanana@kernel.org>
+Cc: Christian Brauner <brauner@kernel.org>
+Cc: linux-unionfs@vger.kernel.org
+Cc: linux-fsdevel@vger.kernel.org
+/* v2 */
+Dave Chinner <dchinner@redhat.com>:
+- Use easier to follow logic in the new helper.
+
+/* v3 */
+Amir Goldstein <amir73il@gmail.com>:
+- Rename helper from should_remove_sgid() to setattr_should_drop_sgid() to
+  better indicate its semantics.
+- Return setattr_should_drop_sgid() directly now that it returns ATTR_KILL_SGID
+  instead of a boolean.
+
+To: Amir Goldstein <amir73il@gmail.com>
+To: Miklos Szeredi <miklos@szeredi.hu>
+To: "Darrick J . Wong" <djwong@kernel.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Seth Forshee (DigitalOcean) <sforshee@kernel.org>
+Cc: Yang Xu <xuyang2018.jy@fujitsu.com>
+Cc: Filipe Manana <fdmanana@kernel.org>
+Cc: Christian Brauner <brauner@kernel.org>
+Cc: linux-unionfs@vger.kernel.org
+Cc: linux-fsdevel@vger.kernel.org
+/* v2 */
+Dave Chinner <dchinner@redhat.com>:
+- Use easier to follow logic in the new helper.
+
+/* v3 */
+Amir Goldstein <amir73il@gmail.com>:
+- Rename helper from should_remove_sgid() to setattr_should_drop_sgid() to
+  better indicate its semantics.
