@@ -10,8 +10,12 @@ Cc: Christian Brauner <brauner@kernel.org>
 Cc: linux-unionfs@vger.kernel.org
 Cc: linux-fsdevel@vger.kernel.org
 /* v2 */
-patch added
+patch not present
 
 /* v3 */
+patch not present
+
+/* v4 */
+patch added
 Amir Goldstein <amir73il@gmail.com>:
-- Return 0 or ATTR_KILL_SGID to make all dropping helpers behave similarly.
+- Make the move of should_remove_suid() a separate patch.
