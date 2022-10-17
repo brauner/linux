@@ -19,3 +19,8 @@ Amir Goldstein <amir73il@gmail.com>:
   better indicate its semantics.
 - Return setattr_should_drop_sgid() directly now that it returns ATTR_KILL_SGID
   instead of a boolean.
+
+/* v4 */
+Amir Goldstein <amir73il@gmail.com>:
+- Add a section comment for fs/attr.c into fs/internal.h to be consistent with
+  the rest.
