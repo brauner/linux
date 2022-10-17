@@ -12,3 +12,8 @@ Cc: linux-fsdevel@vger.kernel.org
 /* v2 */
 Dave Chinner <dchinner@redhat.com>:
 - Use easier to follow logic in the new helper.
+
+/* v3 */
+Amir Goldstein <amir73il@gmail.com>:
+- Rename helper from should_remove_sgid() to setattr_should_drop_sgid() to
+  better indicate its semantics.
