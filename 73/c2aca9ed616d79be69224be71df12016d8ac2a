@@ -15,3 +15,22 @@ patch added
 /* v3 */
 Amir Goldstein <amir73il@gmail.com>:
 - Return 0 or ATTR_KILL_SGID to make all dropping helpers behave similarly.
+
+To: Amir Goldstein <amir73il@gmail.com>
+To: Miklos Szeredi <miklos@szeredi.hu>
+To: "Darrick J . Wong" <djwong@kernel.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Seth Forshee (DigitalOcean) <sforshee@kernel.org>
+Cc: Yang Xu <xuyang2018.jy@fujitsu.com>
+Cc: Filipe Manana <fdmanana@kernel.org>
+Cc: Christian Brauner <brauner@kernel.org>
+Cc: linux-unionfs@vger.kernel.org
+Cc: linux-fsdevel@vger.kernel.org
+/* v2 */
+patch added
+
+TODO:
+
+- Move should_remove_suid() helper from inode.c to attr.c where it belongs.
+- Rename setattr_drop_sgid() to setattr_should_drop_sgid().
