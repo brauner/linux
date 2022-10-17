@@ -1,0 +1,33 @@
+To: Amir Goldstein <amir73il@gmail.com>
+To: Miklos Szeredi <miklos@szeredi.hu>
+To: "Darrick J . Wong" <djwong@kernel.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Seth Forshee (DigitalOcean) <sforshee@kernel.org>
+Cc: Yang Xu <xuyang2018.jy@fujitsu.com>
+Cc: Filipe Manana <fdmanana@kernel.org>
+Cc: Christian Brauner <brauner@kernel.org>
+Cc: linux-unionfs@vger.kernel.org
+Cc: linux-fsdevel@vger.kernel.org
+/* v2 */
+Amir Goldstein <amir73il@gmail.com>:
+- mention xfstests that failed prior to that
+
+Christian Brauner <brauner@kernel.org>:
+- Use should_remove_sgid() in chown_common() just like we do in do_truncate().
+
+/* v3 */
+Christian Brauner <brauner@kernel.org>:
+- Move should_remove_suid() from inode.c to attr.c where it belongs with the
+  rest of the iattr helpers. Especially since it returns ATTR_KILL_S{G,U}ID
+  flags. We also rename it to setattr_should_drop_suidgid() to better reflect
+  that it indicates both setuid and setgid bit removal and also that it returns
+  attr flags.
+- Since setattr_should_drop_suidgid() only needs the inode pass an inode,
+  not a dentry.
+
+/* v4 */
+Amir Goldstein <amir73il@gmail.com>:
+- Remove double sign-off.
+- Call and store return value of setattr_should_drop_sgid() directly in
+  setattr_should_drop_suidgid().
