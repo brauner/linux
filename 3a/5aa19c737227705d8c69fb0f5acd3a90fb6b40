@@ -17,3 +17,5 @@ Dave Chinner <dchinner@redhat.com>:
 Amir Goldstein <amir73il@gmail.com>:
 - Rename helper from should_remove_sgid() to setattr_should_drop_sgid() to
   better indicate its semantics.
+- Return setattr_should_drop_sgid() directly now that it returns ATTR_KILL_SGID
+  instead of a boolean.
