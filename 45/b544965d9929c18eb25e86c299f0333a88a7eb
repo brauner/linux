@@ -1,0 +1,26 @@
+To: linux-fsdevel@vger.kernel.org
+Cc: Seth Forshee <sforshee@kernel.org>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Eric Van Hensbergen <ericvh@gmail.com>
+Cc: Latchesar Ionkov <lucho@ionkov.net>
+Cc: Dominique Martinet <asmadeus@codewreck.org>
+Cc: Christian Schoenebeck <linux_oss@crudebyte.com>
+Cc: v9fs-developer@lists.sourceforge.net
+Cc: linux-security-module@vger.kernel.org
+/* v2 */
+Al Viro <viro@zeniv.linux.org.uk>:
+- Fix leak due to early return instead of goto.
+
+Christian Brauner (Microsoft) <brauner@kernel.org>:
+- Fix leak and call kfree() when we skip setting posix acls because acl can be
+  represented by mode bits.
+
+/* v3 */
+unchanged
+
+/* v4 */
+unchanged
+
+/* v5 */
+unchanged
