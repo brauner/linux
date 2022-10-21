@@ -3,4 +3,5 @@ To: Christoph Hellwig <hch@lst.de>
 Cc: Al Viro <viro@zeniv.linux.org.uk>
 Cc: Miklos Szeredi <mszeredi@redhat.com>
 To: linux-fsdevel@vger.kernel.org
+Cc: linux-unionfs@vger.kernel.org
 Note that this patch is currently also in Miklos tree.
