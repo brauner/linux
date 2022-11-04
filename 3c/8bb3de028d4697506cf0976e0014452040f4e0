@@ -1,0 +1,16 @@
+Cc: "Paul E. McKenney" <paulmck@kernel.org>
+
+In addition to this patch I would like to propose that we restrict the number
+of xattrs for the simple xattr infrastructure via XATTR_MAX_LIST bytes. In
+other words, we restrict the number of xattrs for simple xattr filesystems to
+the number of xattrs names that can be retrieved via listxattr(). That should
+be about 2000 to 3000 xattrs per inode which is more than enough. We should
+risk this and see if we get any regression reports from userswith this
+approach.
+
+This should be as simple as adding a max_list member to struct simple_xattrs
+and initialize it with XATTR_MAX_LIST. Set operations would then check against
+this field whether the new xattr they are trying to set will fit and return
+-EFBIG otherwise. I think that might be a good approach to get rid of the in
+principle unbounded number of xattrs that can be set via the simple xattr
+infrastructure. I think this is a regression risk worth taking.
