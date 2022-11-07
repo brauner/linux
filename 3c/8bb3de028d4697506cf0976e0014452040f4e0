@@ -1,11 +1,12 @@
 To: Tejun Heo <tj@kernel.org>
 To: linux-fsdevel@vger.kernel.org
-Cc: "Paul E. McKenney" <paulmck@kernel.org>
 Cc: Vasily Averin <vvs@openvz.org>
-Cc: Al Viro <viro@zeniv.linux.org.uk>
-Cc: Roman Gushchin <roman.gushchin@linux.dev>
-Cc: Stéphane Graber <stgraber@ubuntu.com>
 Cc: Hugh Dickins <hughd@google.com>
+Cc: Seth Forshee (Digital Ocean) <sforshee@kernel.org>
+Cc: Stéphane Graber <stgraber@ubuntu.com>
+Cc: Roman Gushchin <roman.gushchin@linux.dev>
+Cc: "Paul E. McKenney" <paulmck@kernel.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
 
 In addition to this patch I would like to propose that we restrict the number
 of xattrs for the simple xattr infrastructure via XATTR_MAX_LIST bytes. In
