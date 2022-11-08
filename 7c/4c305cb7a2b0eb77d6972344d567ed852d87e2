@@ -7,7 +7,6 @@ Cc: Stéphane Graber <stgraber@ubuntu.com>
 Cc: Roman Gushchin <roman.gushchin@linux.dev>
 Cc: "Paul E. McKenney" <paulmck@kernel.org>
 Cc: Al Viro <viro@zeniv.linux.org.uk>
-
 In addition to this patch I would like to propose that we restrict the number
 of xattrs for the simple xattr infrastructure via XATTR_MAX_LIST bytes. In
 other words, we restrict the number of xattrs for simple xattr filesystems to
@@ -22,3 +21,7 @@ this field whether the new xattr they are trying to set will fit and return
 -EFBIG otherwise. I think that might be a good approach to get rid of the in
 principle unbounded number of xattrs that can be set via the simple xattr
 infrastructure. I think this is a regression risk worth taking.
+
+/* v2 */
+Christian Brauner <brauner@kernel.org>:
+- Fix kernel doc.
