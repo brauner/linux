@@ -25,3 +25,4 @@ infrastructure. I think this is a regression risk worth taking.
 /* v2 */
 Christian Brauner <brauner@kernel.org>:
 - Fix kernel doc.
+- Remove accidental leftover union from previous iteration.
