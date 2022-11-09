@@ -26,3 +26,7 @@ infrastructure. I think this is a regression risk worth taking.
 Christian Brauner <brauner@kernel.org>:
 - Fix kernel doc.
 - Remove accidental leftover union from previous iteration.
+
+/* v3 */
+"Paul E. McKenney" <paulmck@kernel.org>:
+- Fix simple_xattr_add() by searching the correct slot in the rbtree first.
