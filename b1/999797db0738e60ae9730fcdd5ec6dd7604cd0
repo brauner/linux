@@ -30,3 +30,4 @@ Christian Brauner <brauner@kernel.org>:
 /* v3 */
 "Paul E. McKenney" <paulmck@kernel.org>:
 - Fix simple_xattr_add() by searching the correct slot in the rbtree first.
+- Perform memcpy() under rcu_read_lock() to get rid of refcount_t.
