@@ -7,6 +7,16 @@ Cc: Stéphane Graber <stgraber@ubuntu.com>
 Cc: Roman Gushchin <roman.gushchin@linux.dev>
 Cc: "Paul E. McKenney" <paulmck@kernel.org>
 Cc: Al Viro <viro@zeniv.linux.org.uk>
+In the v1 and v2 of this patch we used an rbtree which was protected by an
+rcu+seqlock combination. During the discussion it became clear that there's
+some valid concern how safe it is to combine rcu with rbtrees. While most of
+the issues are highly unlikely to matter in practice the code here can be
+reached by unprivileged users rather directly so we should not be adventurous.
+Instead of the rcu+seqlock combination simply use an rwlock. This will scale
+sufficiently as well and had been one of the implementations I considered and
+wrote a little while ago. Thanks to Paul for some deeper insights into issues
+associated with rcu and rbtrees!
+
 In addition to this patch I would like to propose that we restrict the number
 of xattrs for the simple xattr infrastructure via XATTR_MAX_LIST bytes. In
 other words, we restrict the number of xattrs for simple xattr filesystems to
@@ -28,7 +38,7 @@ Christian Brauner <brauner@kernel.org>:
 - Remove accidental leftover union from previous iteration.
 
 /* v3 */
-Port the whole thing from rcu+seqlock+rbtree to simple rwlock+rbtree.
+Port the whole thing to use a simple rwlock instead of rcu+seqlock.
 
 "Paul E. McKenney" <paulmck@kernel.org>:
 - Fix simple_xattr_add() by searching the correct slot in the rbtree first.
