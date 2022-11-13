@@ -2,3 +2,12 @@ To: Mike Marshall <hubcap@omnibond.com>
 Cc: linux-fsdevel <linux-fsdevel@vger.kernel.org>
 In-Reply-To: <20221112100945.uig2jef74oxbg6gd@wittgenstein>
 Link: https://lore.kernel.org/linux-fsdevel/CAOg9mSSq_yV=q5J6sEh8qHWwLe_wYwwsb1rTEh11k52D2nm11g@mail.gmail.com
+
+Hey Mike,
+
+The fix is pretty straightforward. I forgot to update the mode through
+__orangefs_setattr() and in the ACL_TYPE_ACCESS acl. This patch restores
+this and fixes the reported xfstest failure. I've pushed this out now.
+
+Thanks!
+Christian
