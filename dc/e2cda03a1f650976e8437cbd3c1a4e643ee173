@@ -1,0 +1,8 @@
+Another restriction we're going to need for MOVE_MOUNT_T_REPLACE is that the
+target mount point must actually be a mountpoint. IOW, if you have:
+
+mount /dev/sda1 /mnt
+mkdir /mnt/target
+mount-replace /dev/sda2 /mnt/target
+
+then this would fail with -EINVAL becaseu /mnt/target isn't a mountpoint.
