@@ -6,3 +6,66 @@ mkdir /mnt/target
 mount-replace /dev/sda2 /mnt/target
 
 then this would fail with -EINVAL becaseu /mnt/target isn't a mountpoint.
+
+Notes on mount semantics with mount propagation:
+
+Consider two mount namespaces. The host mount namespace is shared. A first
+mount namespace is created which is a dependent ("slave") mount namespace. IOW,
+mount events propagate from the host mount namespace into the first mount
+namespace but not vica versa.
+
+We create a mount in the host mount namespace
+
+  mount --bind /opt /mnt
+
+which propagates into the first mount namespace. We create a mount in the first
+mount namespace:
+
+  mount --bind /tmp /mnt
+
+This mount only appears in the first mount namespace and doesn't propagate to
+the host mount namespace.
+
+We unmount /mnt in the host mount namespace. This will undo:
+
+  mount --bind /opt /mnt
+
+from above in the host mount namespace. However, in the first mount namespace
+the second mount
+
+  mount --bind /tmp /mnt
+
+will stick around. IOW, the stacked upon mount is unmounted while the top mount
+isn't.
+
+Now consider a case where the mounted on dentry is provided is exclusively
+provided by the stacked upon mount. In the host mount namespace we do:
+
+  mkdir /opt/mntpt
+  mount --bind /opt /mnt
+
+and in the first mount namespace we do:
+
+  mount --bind /tmp /mnt/mntpt
+
+We know unmount /mnt in the host mount namespace which undoes:
+
+  mount --bind /opt /mnt
+
+This time the umount will not propagate into the first mount namespace. IOW,
+the stacked upon and the top mount both stick around as the mountpoint of the
+top mount is provided exclusively by the stacked upon mount.
+
+Now we unlink /opt/mntpt in the host mount namespace:
+
+  rmdir /opt/mntpt
+
+now the stacked upon as well as the top mount are unmounted in the first mount
+namespace. The reason is that during file or directory removal the VFS will
+detach the mounts that other mount namespaces have stacked upon the file or
+directory.
+
+This is an interesting semantic tidbit, as it means if you want to make sure
+that /opt/mntpt isn't used as a mountpoint anymore in any other mount namespace
+you should unlink it as it will detach all mounts stacked upon it in other
+mount namespaces that don't propagate mount events into your mount namespace.
