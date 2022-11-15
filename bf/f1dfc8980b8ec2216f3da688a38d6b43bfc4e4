@@ -185,6 +185,23 @@ then the current implementation causes the layout explained above:
   │ └─/mnt                                      /dev/sda2[/tmp] ext4       rw,relatime
   ├─/opt                                        /dev/sda2[/tmp] ext4       rw,relatime
 
+I've debugged umount_tree() when it is called on @to_path->mnt[/opt@/mnt].
+Without raising UMOUNT_PROPAGATE this will select both the "/opt" and "/tmp"
+vfsmounts for unmounting. Both vfsmounts are mounted at the the
+mount->mnt_mp["/mnt"] mountpoint. Requesting that the
+
+The vfsmount with vfsmount->mnt_root["/opt"] is
+mounted at the mount->mnt_mp["/mnt"] and will be unmounted.
+
+The
+mountpoint mount->mnt_mp["/opt"] is still pinned
+
+which gets rid of the mounts and their two respective
+mountpoints. The vfsmount with vfsmnt->mnt_root["/opt"] is mounted at the mnt-
+
+on top of the "/mnt" mountpoint for unmounting. Consequently after this call
+both "/opt" and "/
+
 If we now call umount_tree() on the mount of "/opt" at the "/mnt" mountpoint in
 the kernel this will get rid of all mounts. First, the "/opt" mount on top of
 the "/mnt" mountpoint will be unmounted. Since "/opt" is a shared mount and the
