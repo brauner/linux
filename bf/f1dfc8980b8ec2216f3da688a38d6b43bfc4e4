@@ -72,24 +72,155 @@ mount namespaces that don't propagate mount events into your mount namespace.
 
 /* Issues */
 
-The current implementation seems to have a bug. My thinking had been that you
-can simply:
-
-do_move_mount(from_path, to_path);
-
-followed by a
-
-umount_tree(&to_path->mnt, UMOUNT_PROPAGATE);
-
-but that seems to run into issues. When UMOUNT_PROPAGATE is specified it seems
-to wipe the stacked upon and the new top mouns mount. If I stop passing
-UMOUNT_PROPAGATE then a clearer picture emerges:
+The current implementation seems to have a bug:
 
   mount --bind /opt /mnt
   mount --replace /tmp /mnt
 
-is _supposed to mean_ that /tmp will be mounted on top of /mnt and /opt
-unmounted. However, what happens is after this sequence /tmp is mounted on /opt
-and /opt is unmounted from /mnt.
+is supposed to replace the mount of "/opt" at "/mnt" with the mount of "/tmp"
+at "/mnt". My thinking had been that this can simply be implemented as:
 
-The questions remains why UMOUNT_PROPAGATE also unmounts /tmp on top of /opt?
+  do_move_mount(@from_path->mnt[/tmp], @to_path->mnt[/mnt[opt]]);
+
+where "/tmp" is mounted on top of "/mnt", followed by:
+
+  umount_tree(&to_path->mnt[/mnt[opt]], UMOUNT_PROPAGATE);
+
+which would unmount "/opt" on top of "/mnt" and only leave "/tmp" on top of
+"/mnt" around.
+
+However, this implementation doesn't seem to work as:
+
+  umount_tree(&to_path->mnt[/mnt[opt]], UMOUNT_PROPAGATE);
+
+unmounts both "/opt" and "/tmp" on top of "/mnt".
+
+To debug this we can remove UMOUNT_PROPAGATE from the umount_tree() call in
+which case we can see that while:
+
+  mount --bind /opt /mnt
+  mount --replace /tmp /mnt
+
+is _supposed to mean_ that "/tmp" will be mounted on top of "/mnt" and "/opt"
+will be unmounted what happens is that "/tmp" is mounted on "/opt" and "/opt"
+is unmounted from "/mnt".
+
+We can further debug this by realizing that MOVE_MOUNT_T_REPLACE is currently
+implemented as:
+
+  1. mount on top of target
+  2. unmount mount the mount that is now below the just created mount in 1.
+
+What this means we can see in userspace:
+
+  mount --bind /opt /mnt
+  mount --bind /tmp /mnt
+
+If "/opt" on top of "/mnt" is a shared mount then the next mount of "/tmp" on
+top of "/mnt" will cause the "/tmp" mount to propagate to "/opt" itself and we
+end up with the following mount table:
+
+  ├─/mnt                                        /dev/sda2[/opt] ext4       rw,relatime
+  │ └─/mnt                                      /dev/sda2[/tmp] ext4       rw,relatime
+  ├─/opt                                        /dev/sda2[/tmp] ext4       rw,relatime
+
+Consequently if userspace unmounts "/tmp" via the "/opt" mountpoint:
+
+  umount /opt
+
+this will unmount "/tmp" from "/opt". Then the unmount will propagate to the
+mount of "/tmp" on the "/mnt" mountpoint. IOW, the "/tmp" mount is unmounted
+from both the "/mnt" and "/opt" mountpoint.
+
+Similarly, if userspace unmounts "/tmp" via the "/mnt" mountpoint this will
+first unmount "/tmp" from "/mnt". Then the umount will propagate to the mount
+of "/tmp" on the "/opt" mountpoint. IOW, the "/tmp" mount is unmounted from
+both the "/opt" and "/mnt" mountpoints.
+
+So no matter where we unmount the top "/tmp" mount from, it will always
+propagate the unmount if the first mount on top of "/mnt" was shared
+(mount --make-private /opt or mount --make-private /mnt won't change this after
+ the fact).
+
+So a unmount of either via "/opt" or "/mnt" mountpoint will always kill both
+"/tmp" mounts:
+
+  │ └─/mnt                                      /dev/sda2[/tmp] ext4       rw,relatime
+  ├─/opt                                        /dev/sda2[/tmp] ext4       rw,relatime
+
+However, things look different when the first mount is a private mount:
+
+  mount --bind /opt /mnt
+  mount --make-private /mnt
+  mount --bind /tmp /mnt
+
+which means that the a mount of "/tmp" via the "/mnt" mountpoint will only
+stack the "/tmp" mount on top of the "/opt" mount on the "/mnt" mountpoint. The
+"/tmp" mount will not be propagated to the "/opt" mountpoint:
+
+  ├─/mnt                                        /dev/sda2[/opt] ext4       rw,relatime
+  │ └─/mnt                                      /dev/sda2[/tmp] ext4       rw,relatime
+
+Consequently, an unmount of the "/tmp" mount via the "/mnt" mountpoint doesn't
+have to propagate anywhere.
+
+After this mount propagation detour we should be able to better understand why
+the current implementation:
+
+  1. mount on top of target
+  2. unmount mount the mount that is now below the just created mount in 1.
+
+doesn't work.
+
+If the first mount of "/opt" on top of the "/mnt" mountpoint is a shared mount
+and we ask the kernel to replace the "/opt" mount on the "/mnt" mountpoint with
+a "/tmp" mount:
+
+  mount --bind /opt /mnt
+  mount --replace /tmp /mnt
+
+then the current implementation causes the layout explained above:
+
+  ├─/mnt                                        /dev/sda2[/opt] ext4       rw,relatime
+  │ └─/mnt                                      /dev/sda2[/tmp] ext4       rw,relatime
+  ├─/opt                                        /dev/sda2[/tmp] ext4       rw,relatime
+
+If we now call umount_tree() on the mount of "/opt" at the "/mnt" mountpoint in
+the kernel this will get rid of all mounts. First, the "/opt" mount on top of
+the "/mnt" mountpoint will be unmounted. Since "/opt" is a shared mount and the
+"/tmp" mount has been propagated on top of the "/opt" mountpoint
+
+- If we don't propagate the umount via UMOUNT_PROPAGATE we can see that the
+  only mount left over after the call to umount_tree() on the "/opt" mount on
+  top of "/mnt" will be the mount of "/opt" on top of the "/mnt" mountpoint
+  This means that UMOUNT_PROPAGATE will cause the "/opt" mount on top of "/mnt"
+  to be unmounted as well.
+
+// When we call umount_tree() on the
+//
+//   umount_tree(@to_path->mnt[/mnt[opt]]
+//
+// we propagate this umount via
+//
+//   propagate_umount(@to_path->mnt[/mnt[opt]])
+//
+// and our goal is to unmount the "/opt" mount on top of "/mnt" directly below the
+// "/tmp" mount on top of "/mnt". So we call
+//
+//   umount_tree() on @to_path->mnt[/opt]
+//
+// umount_tree() will now find the mounts that belong to this mount tree which
+// are "/opt" and "/tmp".
+//
+//
+// The umount candidates that are found by
+// umount_tree(opt@tmp) are thus "/opt" and "/tmp" which is mounted on top of
+// "/opt". We start with unmounting "/opt"
+//
+// So we umount "/opt" first which but since "/tmp" is mounted on top of
+// "/opt" we're unmounting
+//
+//
+// The questions remains why UMOUNT_PROPAGATE also unmounts "/tmp" on top of "/opt"?
+// When umount_tree() is called both "/opt" and "/tmp" end up on the list of
+// mounts to unmount. Presumably because they are both mounted on top of "mnt"?
