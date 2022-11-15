@@ -69,3 +69,27 @@ This is an interesting semantic tidbit, as it means if you want to make sure
 that /opt/mntpt isn't used as a mountpoint anymore in any other mount namespace
 you should unlink it as it will detach all mounts stacked upon it in other
 mount namespaces that don't propagate mount events into your mount namespace.
+
+/* Issues */
+
+The current implementation seems to have a bug. My thinking had been that you
+can simply:
+
+do_move_mount(from_path, to_path);
+
+followed by a
+
+umount_tree(&to_path->mnt, UMOUNT_PROPAGATE);
+
+but that seems to run into issues. When UMOUNT_PROPAGATE is specified it seems
+to wipe the stacked upon and the new top mouns mount. If I stop passing
+UMOUNT_PROPAGATE then a clearer picture emerges:
+
+  mount --bind /opt /mnt
+  mount --replace /tmp /mnt
+
+is _supposed to mean_ that /tmp will be mounted on top of /mnt and /opt
+unmounted. However, what happens is after this sequence /tmp is mounted on /opt
+and /opt is unmounted from /mnt.
+
+The questions remains why UMOUNT_PROPAGATE also unmounts /tmp on top of /opt?
