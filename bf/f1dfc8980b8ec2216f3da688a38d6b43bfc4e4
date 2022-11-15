@@ -186,8 +186,52 @@ then the current implementation causes the layout explained above:
   ├─/opt                                        /dev/sda2[/tmp] ext4       rw,relatime
 
 I've debugged umount_tree() when it is called on @to_path->mnt[/opt@/mnt].
-Without raising UMOUNT_PROPAGATE this will select both the "/opt" and "/tmp"
-vfsmounts for unmounting. Both vfsmounts are mounted at the the
+At the start of umount_tree() it will select both the "/opt" and "/tmp"
+vfsmounts for unmounting. The "/opt" vfsmount is mounted at the
+mount->mnt_mountpoint["/mnt"] while the "/tmp" vfsmount is mounted at the
+mount->mnt_mountpoint["/opt"] mountpoint.
+
+The question I have is the "/tmp" vfsmount is selected even though we pass the
+"/opt" vfsmount - or rather the struct mount that contains the "/opt" vfsmount
+- to umount_tree().
+
+The vfsmount of "/opt" mut be connectd to the vfsmount of "/tmp" somehow. But
+it is unclear through what. One reason might be that is that they are connected
+through shared mount propagation. That would mean that the selected "/tmp"
+vfsmount would be the one that has "/opt" as it's mountpoint.
+
+We should be able to test this by turning off shared mount propagation for the
+first mount of the "/opt" vfsmount at "/mnt". If afterwards the "/tmp" vfsmount
+is still selected then it can't be the one with "/opt" as its mountpoint but
+rather the one with "/mnt" as it's mountpoint. We can first look at what this
+would mean in userspace before we look at the kernel:
+
+  mount --bind /opt /mnt
+  mount --make-private /mnt
+  mount --bind /tmp /mnt
+
+This leads to the following mount table where the vfsmount of "/tmp" isn't
+propagated to the "/opt" mountpoint:
+
+  ├─/mnt                                        /dev/sda2[/opt] ext4       rw,relatime
+  │ └─/mnt                                      /dev/sda2[/tmp] ext4       rw,relatime
+
+The unmount of the vfsmount of "/tmp" at the "/mnt" mountpoint will leave the
+underlying vfsmount of "/opt" at the "/mnt" mountpoint intact:
+
+  ├─/mnt                                        /dev/sda2[/opt] ext4       rw,relatime
+
+Now let's try this with:
+
+  mount --bind /opt /mnt
+  mount --make-private /mnt
+  mount --replace /tmp /mnt
+
+This will continue to select the vfsmounts of "/opt" and "/tmp" for unmounting.
+Thus the "/tmp" vfsmount isn't the one mounted at the "/opt" mountpoint but the
+one mounted at the "/mnt" mountpoint.
+
+Both vfsmounts are mounted at the
 mount->mnt_mp["/mnt"] mountpoint. Requesting that the
 
 The vfsmount with vfsmount->mnt_root["/opt"] is
