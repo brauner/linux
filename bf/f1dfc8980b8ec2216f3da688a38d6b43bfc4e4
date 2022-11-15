@@ -215,3 +215,5 @@ mountpoint was created by mount propagation during
 
 any unmount of the "/tmp" vfsmount from either mountpoint (see above) will
 cause both mounts to be unmounted.
+
+/* Alternative Implementation */
