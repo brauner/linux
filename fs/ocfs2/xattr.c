@@ -89,21 +89,9 @@ static struct ocfs2_xattr_def_value_root def_xv = {
 
 const struct xattr_handler *ocfs2_xattr_handlers[] = {
 	&ocfs2_xattr_user_handler,
-	&posix_acl_access_xattr_handler,
-	&posix_acl_default_xattr_handler,
 	&ocfs2_xattr_trusted_handler,
 	&ocfs2_xattr_security_handler,
 	NULL
-};
-
-static const struct xattr_handler *ocfs2_xattr_handler_map[OCFS2_XATTR_MAX] = {
-	[OCFS2_XATTR_INDEX_USER]	= &ocfs2_xattr_user_handler,
-	[OCFS2_XATTR_INDEX_POSIX_ACL_ACCESS]
-					= &posix_acl_access_xattr_handler,
-	[OCFS2_XATTR_INDEX_POSIX_ACL_DEFAULT]
-					= &posix_acl_default_xattr_handler,
-	[OCFS2_XATTR_INDEX_TRUSTED]	= &ocfs2_xattr_trusted_handler,
-	[OCFS2_XATTR_INDEX_SECURITY]	= &ocfs2_xattr_security_handler,
 };
 
 struct ocfs2_xattr_info {
@@ -528,13 +516,34 @@ static int ocfs2_read_xattr_block(struct inode *inode, u64 xb_blkno,
 	return rc;
 }
 
-static inline const char *ocfs2_xattr_prefix(int name_index)
+static const char *ocfs2_xattr_prefix(int xattr_index)
 {
+	const char *name = NULL;
 	const struct xattr_handler *handler = NULL;
 
-	if (name_index > 0 && name_index < OCFS2_XATTR_MAX)
-		handler = ocfs2_xattr_handler_map[name_index];
-	return handler ? xattr_prefix(handler) : NULL;
+	switch (xattr_index) {
+	case OCFS2_XATTR_INDEX_USER:
+		handler = &ocfs2_xattr_user_handler;
+		break;
+	case OCFS2_XATTR_INDEX_TRUSTED:
+		handler = &ocfs2_xattr_trusted_handler;
+		break;
+	case OCFS2_XATTR_INDEX_SECURITY:
+		handler = &ocfs2_xattr_security_handler;
+		break;
+	case OCFS2_XATTR_INDEX_POSIX_ACL_ACCESS:
+		name = XATTR_NAME_POSIX_ACL_ACCESS;
+		break;
+	case OCFS2_XATTR_INDEX_POSIX_ACL_DEFAULT:
+		name = XATTR_NAME_POSIX_ACL_DEFAULT;
+		break;
+	default:
+		return NULL;
+	}
+
+	name = xattr_prefix(handler);
+
+	return name;
 }
 
 static u32 ocfs2_xattr_name_hash(struct inode *inode,
