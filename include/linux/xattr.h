@@ -47,6 +47,12 @@ struct xattr_handler {
 		   size_t size, int flags);
 };
 
+static inline bool xattr_dentry_list(const struct xattr_handler *handler,
+				     struct dentry *dentry)
+{
+	return handler && (!handler->list || handler->list(dentry));
+}
+
 const char *xattr_full_name(const struct xattr_handler *, const char *);
 
 struct xattr {
