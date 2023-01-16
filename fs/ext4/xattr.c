@@ -83,32 +83,52 @@ static __le32 ext4_xattr_hash_entry(char *name, size_t name_len, __le32 *value,
 				    size_t value_count);
 static void ext4_xattr_rehash(struct ext4_xattr_header *);
 
-static const struct xattr_handler * const ext4_xattr_handler_map[] = {
-	[EXT4_XATTR_INDEX_USER]		     = &ext4_xattr_user_handler,
-#ifdef CONFIG_EXT4_FS_POSIX_ACL
-	[EXT4_XATTR_INDEX_POSIX_ACL_ACCESS]  = &posix_acl_access_xattr_handler,
-	[EXT4_XATTR_INDEX_POSIX_ACL_DEFAULT] = &posix_acl_default_xattr_handler,
-#endif
-	[EXT4_XATTR_INDEX_TRUSTED]	     = &ext4_xattr_trusted_handler,
-#ifdef CONFIG_EXT4_FS_SECURITY
-	[EXT4_XATTR_INDEX_SECURITY]	     = &ext4_xattr_security_handler,
-#endif
-	[EXT4_XATTR_INDEX_HURD]		     = &ext4_xattr_hurd_handler,
-};
-
 const struct xattr_handler *ext4_xattr_handlers[] = {
 	&ext4_xattr_user_handler,
 	&ext4_xattr_trusted_handler,
-#ifdef CONFIG_EXT4_FS_POSIX_ACL
-	&posix_acl_access_xattr_handler,
-	&posix_acl_default_xattr_handler,
-#endif
 #ifdef CONFIG_EXT4_FS_SECURITY
 	&ext4_xattr_security_handler,
 #endif
 	&ext4_xattr_hurd_handler,
 	NULL
 };
+
+static const char *ext4_xattr_prefix(int xattr_index, struct dentry *dentry)
+{
+	const char *name = NULL;
+	const struct xattr_handler *handler = NULL;
+
+	switch (xattr_index) {
+	case EXT4_XATTR_INDEX_USER:
+		handler = &ext4_xattr_user_handler;
+		break;
+	case EXT4_XATTR_INDEX_TRUSTED:
+		handler = &ext4_xattr_trusted_handler;
+		break;
+#ifdef CONFIG_EXT4_FS_SECURITY
+	case EXT4_XATTR_INDEX_SECURITY:
+		handler = &ext4_xattr_security_handler;
+		break;
+#endif
+#ifdef CONFIG_EXT4_FS_POSIX_ACL
+	case EXT4_XATTR_INDEX_POSIX_ACL_ACCESS:
+		if (posix_acl_dentry_list(dentry))
+			name = XATTR_NAME_POSIX_ACL_ACCESS;
+		break;
+	case EXT4_XATTR_INDEX_POSIX_ACL_DEFAULT:
+		if (posix_acl_dentry_list(dentry))
+			name = XATTR_NAME_POSIX_ACL_DEFAULT;
+		break;
+#endif
+	default:
+		return NULL;
+	}
+
+	if (xattr_dentry_list(handler, dentry))
+		name = xattr_prefix(handler);
+
+	return name;
+}
 
 #define EA_BLOCK_CACHE(inode)	(((struct ext4_sb_info *) \
 				inode->i_sb->s_fs_info)->s_ea_block_cache)
@@ -169,16 +189,6 @@ static void ext4_xattr_block_csum_set(struct inode *inode,
 	if (ext4_has_metadata_csum(inode->i_sb))
 		BHDR(bh)->h_checksum = ext4_xattr_block_csum(inode,
 						bh->b_blocknr, BHDR(bh));
-}
-
-static inline const struct xattr_handler *
-ext4_xattr_handler(int name_index)
-{
-	const struct xattr_handler *handler = NULL;
-
-	if (name_index > 0 && name_index < ARRAY_SIZE(ext4_xattr_handler_map))
-		handler = ext4_xattr_handler_map[name_index];
-	return handler;
 }
 
 static int
@@ -679,11 +689,10 @@ ext4_xattr_list_entries(struct dentry *dentry, struct ext4_xattr_entry *entry,
 	size_t rest = buffer_size;
 
 	for (; !IS_LAST_ENTRY(entry); entry = EXT4_XATTR_NEXT(entry)) {
-		const struct xattr_handler *handler =
-			ext4_xattr_handler(entry->e_name_index);
+		const char *prefix;
 
-		if (handler && (!handler->list || handler->list(dentry))) {
-			const char *prefix = handler->prefix ?: handler->name;
+		prefix = ext4_xattr_prefix(entry->e_name_index, dentry);
+		if (prefix) {
 			size_t prefix_len = strlen(prefix);
 			size_t size = prefix_len + entry->e_name_len + 1;
 
