@@ -52,6 +52,7 @@
 #include <linux/quotaops.h>
 #include <linux/security.h>
 #include <linux/posix_acl_xattr.h>
+#include <linux/xattr.h>
 
 #define PRIVROOT_NAME ".reiserfs_priv"
 #define XAROOT_NAME   "xattrs"
@@ -771,22 +772,26 @@ out:
 			(handler) = *(handlers)++)
 
 /* This is the implementation for the xattr plugin infrastructure */
-static inline const struct xattr_handler *
-find_xattr_handler_prefix(const struct xattr_handler **handlers,
-			   const char *name)
+static inline bool reiserfs_xattr_list(const struct xattr_handler **handlers,
+				       const char *name, struct dentry *dentry)
 {
-	const struct xattr_handler *xah;
+	const struct xattr_handler *xah = NULL;
 
-	if (!handlers)
-		return NULL;
+	if (handlers) {
+		for_each_xattr_handler(handlers, xah) {
+			const char *prefix = xattr_prefix(xah);
 
-	for_each_xattr_handler(handlers, xah) {
-		const char *prefix = xattr_prefix(xah);
-		if (strncmp(prefix, name, strlen(prefix)) == 0)
-			break;
+			if (strncmp(prefix, name, strlen(prefix)))
+				continue;
+
+			if (!xattr_dentry_list(xah, dentry))
+				return false;
+
+			return true;
+		}
 	}
 
-	return xah;
+	return (posix_acl_type(name) >= 0) && posix_acl_dentry_list(dentry);
 }
 
 struct listxattr_buf {
@@ -807,12 +812,7 @@ static bool listxattr_filler(struct dir_context *ctx, const char *name,
 
 	if (name[0] != '.' ||
 	    (namelen != 1 && (name[1] != '.' || namelen != 2))) {
-		const struct xattr_handler *handler;
-
-		handler = find_xattr_handler_prefix(b->dentry->d_sb->s_xattr,
-						    name);
-		if (!handler /* Unsupported xattr name */ ||
-		    (handler->list && !handler->list(b->dentry)))
+		if (!reiserfs_xattr_list(b->dentry->d_sb->s_xattr, name, b->dentry))
 			return true;
 		size = namelen + 1;
 		if (b->buf) {
@@ -910,10 +910,6 @@ const struct xattr_handler *reiserfs_xattr_handlers[] = {
 #endif
 #ifdef CONFIG_REISERFS_FS_SECURITY
 	&reiserfs_xattr_security_handler,
-#endif
-#ifdef CONFIG_REISERFS_FS_POSIX_ACL
-	&posix_acl_access_xattr_handler,
-	&posix_acl_default_xattr_handler,
 #endif
 	NULL
 };
