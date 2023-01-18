@@ -120,5 +120,6 @@ static inline bool inode_xattr_disabled(struct inode *inode)
 	return !(inode->i_opflags & IOP_XATTR) &&
 	       (inode->i_opflags & IOP_NOACL);
 }
+int xattr_list_one(char **buffer, ssize_t *remaining_size, const char *name);
 
 #endif	/* _LINUX_XATTR_H */
