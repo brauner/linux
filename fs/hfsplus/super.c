@@ -490,6 +490,7 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 		atomic_set(&sbi->attr_tree_state, HFSPLUS_VALID_ATTR_TREE);
 	}
 	sb->s_xattr = hfsplus_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 
 	inode = hfsplus_iget(sb, HFSPLUS_ALLOC_CNID);
 	if (IS_ERR(inode)) {

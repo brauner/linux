@@ -1461,6 +1461,7 @@ xfs_fs_fill_super(
 
 	sb_min_blocksize(sb, BBSIZE);
 	sb->s_xattr = xfs_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 	sb->s_export_op = &xfs_export_operations;
 #ifdef CONFIG_XFS_QUOTA
 	sb->s_qcop = &xfs_quotactl_operations;

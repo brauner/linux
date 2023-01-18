@@ -457,8 +457,10 @@ static int afs_fill_super(struct super_block *sb, struct afs_fs_context *ctx)
 	sb->s_maxbytes		= MAX_LFS_FILESIZE;
 	sb->s_magic		= AFS_FS_MAGIC;
 	sb->s_op		= &afs_super_ops;
-	if (!as->dyn_root)
+	if (!as->dyn_root) {
 		sb->s_xattr	= afs_xattr_handlers;
+		sb->s_iflags	|= SB_I_XATTR;
+	}
 	ret = super_setup_bdi(sb);
 	if (ret)
 		return ret;

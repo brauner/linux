@@ -338,6 +338,7 @@ static int squashfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	/* Handle xattrs */
 	sb->s_xattr = squashfs_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 	xattr_id_table_start = le64_to_cpu(sblk->xattr_id_table_start);
 	if (xattr_id_table_start == SQUASHFS_INVALID_BLK) {
 		next_table = msblk->bytes_used;

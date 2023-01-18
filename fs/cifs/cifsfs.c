@@ -235,6 +235,7 @@ cifs_read_super(struct super_block *sb)
 	sb->s_magic = CIFS_SUPER_MAGIC;
 	sb->s_op = &cifs_super_ops;
 	sb->s_xattr = cifs_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 	rc = super_setup_bdi(sb);
 	if (rc)
 		goto out_no_root;

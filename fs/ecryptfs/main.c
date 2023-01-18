@@ -521,6 +521,7 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 	sbi = NULL;
 	s->s_op = &ecryptfs_sops;
 	s->s_xattr = ecryptfs_xattr_handlers;
+	s->s_iflags |= SB_I_XATTR;
 	s->s_d_op = &ecryptfs_dops;
 
 	err = "Reading sb failed";

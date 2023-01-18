@@ -532,6 +532,7 @@ static int jfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_op = &jfs_super_operations;
 	sb->s_export_op = &jfs_export_operations;
 	sb->s_xattr = jfs_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 #ifdef CONFIG_QUOTA
 	sb->dq_op = &dquot_operations;
 	sb->s_qcop = &jfs_quotactl_ops;

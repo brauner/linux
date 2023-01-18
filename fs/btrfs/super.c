@@ -1141,6 +1141,7 @@ static int btrfs_fill_super(struct super_block *sb,
 #endif
 	sb->s_flags |= SB_I_VERSION;
 	sb->s_iflags |= SB_I_CGROUPWB;
+	sb->s_iflags |= SB_I_XATTR;
 
 	err = super_setup_bdi(sb);
 	if (err) {

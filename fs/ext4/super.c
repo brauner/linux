@@ -5104,6 +5104,7 @@ static int __ext4_fill_super(struct fs_context *fc, struct super_block *sb)
 
 	/* i_version is always enabled now */
 	sb->s_flags |= SB_I_VERSION;
+	sb->s_iflags |= SB_I_XATTR;
 
 	if (ext4_check_feature_compatibility(sb, es, silent))
 		goto failed_mount;

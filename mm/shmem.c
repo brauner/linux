@@ -3817,6 +3817,8 @@ static int shmem_fill_super(struct super_block *sb, struct fs_context *fc)
 #ifdef CONFIG_TMPFS_POSIX_ACL
 	sb->s_flags |= SB_POSIXACL;
 #endif
+	if (sb->s_xattr || (sb->s_flags & SB_POSIXACL))
+		sb->s_iflags |= SB_I_XATTR;
 	uuid_gen(&sb->s_uuid);
 
 	inode = shmem_get_inode(sb, NULL, S_IFDIR | sbinfo->mode, 0, VM_NORESERVE);

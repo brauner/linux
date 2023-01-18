@@ -950,6 +950,7 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sb->s_export_op = &ntfs_export_ops;
 	sb->s_time_gran = NTFS_TIME_GRAN; // 100 nsec
 	sb->s_xattr = ntfs_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 	sb->s_d_op = sbi->options->nocase ? &ntfs_dentry_ops : NULL;
 
 	sbi->options->nls = ntfs_load_nls(sbi->options->nls_name);

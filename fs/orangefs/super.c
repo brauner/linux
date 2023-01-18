@@ -433,6 +433,7 @@ static int orangefs_fill_sb(struct super_block *sb,
 
 	/* Hang the xattr handlers off the superblock */
 	sb->s_xattr = orangefs_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 	sb->s_magic = ORANGEFS_SUPER_MAGIC;
 	sb->s_op = &orangefs_s_ops;
 	sb->s_d_op = &orangefs_dentry_operations;

@@ -1077,6 +1077,9 @@ static void nfs_fill_super(struct super_block *sb, struct nfs_fs_context *ctx)
 		break;
 	}
 
+	if (sb->s_xattr || (sb->s_flags & SB_POSIXACL))
+		sb->s_iflags |= SB_I_XATTR;
+
 	sb->s_magic = NFS_SUPER_MAGIC;
 
 	/* We probably want something more informative here */

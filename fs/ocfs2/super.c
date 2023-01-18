@@ -2020,6 +2020,7 @@ static int ocfs2_initialize_super(struct super_block *sb,
 	sb->dq_op = &ocfs2_quota_operations;
 	sb->s_quota_types = QTYPE_MASK_USR | QTYPE_MASK_GRP;
 	sb->s_xattr = ocfs2_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 	sb->s_time_gran = 1;
 	sb->s_flags |= SB_NOATIME;
 	/* this is needed to support O_LARGEFILE */

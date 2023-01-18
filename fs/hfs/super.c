@@ -401,6 +401,7 @@ static int hfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_op = &hfs_super_operations;
 	sb->s_xattr = hfs_xattr_handlers;
 	sb->s_flags |= SB_NODIRATIME;
+	sb->s_iflags |= SB_I_XATTR;
 	mutex_init(&sbi->bitmap_lock);
 
 	res = hfs_mdb_get(sb);

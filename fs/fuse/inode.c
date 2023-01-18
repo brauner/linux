@@ -1181,6 +1181,7 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 			if ((flags & FUSE_POSIX_ACL)) {
 				fc->default_permissions = 1;
 				fc->posix_acl = 1;
+				fm->sb->s_iflags |= SB_I_XATTR;
 			}
 			if (flags & FUSE_CACHE_SYMLINKS)
 				fc->cache_symlinks = 1;
@@ -1426,6 +1427,7 @@ static void fuse_sb_defaults(struct super_block *sb)
 	if (sb->s_user_ns != &init_user_ns)
 		sb->s_iflags |= SB_I_UNTRUSTED_MOUNTER;
 	sb->s_flags &= ~(SB_NOSEC | SB_I_VERSION);
+	sb->s_iflags |= SB_I_XATTR;
 }
 
 static int fuse_fill_super_submount(struct super_block *sb,
@@ -1443,6 +1445,8 @@ static int fuse_fill_super_submount(struct super_block *sb,
 	sb->s_bdi = bdi_get(parent_sb->s_bdi);
 
 	sb->s_xattr = parent_sb->s_xattr;
+	if (sb->s_xattr)
+		sb->s_iflags |= SB_I_XATTR;
 	sb->s_time_gran = parent_sb->s_time_gran;
 	sb->s_blocksize = parent_sb->s_blocksize;
 	sb->s_blocksize_bits = parent_sb->s_blocksize_bits;

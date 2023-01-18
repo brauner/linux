@@ -1171,6 +1171,7 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_op = &ext2_sops;
 	sb->s_export_op = &ext2_export_ops;
 	sb->s_xattr = ext2_xattr_handlers;
+	sb->s_iflags |= SB_I_XATTR;
 
 #ifdef CONFIG_QUOTA
 	sb->dq_op = &dquot_operations;

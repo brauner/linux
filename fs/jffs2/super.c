@@ -285,6 +285,7 @@ static int jffs2_fill_super(struct super_block *sb, struct fs_context *fc)
 #ifdef CONFIG_JFFS2_FS_POSIX_ACL
 	sb->s_flags |= SB_POSIXACL;
 #endif
+	sb->s_iflags |= SB_I_XATTR;
 	return jffs2_do_fill_super(sb, fc);
 }
 
