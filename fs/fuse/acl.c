@@ -11,9 +11,10 @@
 #include <linux/posix_acl.h>
 #include <linux/posix_acl_xattr.h>
 
-struct posix_acl *fuse_get_acl(struct inode *inode, int type, bool rcu)
+static struct posix_acl *__fuse_get_acl(struct fuse_conn *fc,
+					struct user_namespace *mnt_userns,
+					struct inode *inode, int type, bool rcu)
 {
-	struct fuse_conn *fc = get_fuse_conn(inode);
 	int size;
 	const char *name;
 	void *value = NULL;
@@ -25,7 +26,7 @@ struct posix_acl *fuse_get_acl(struct inode *inode, int type, bool rcu)
 	if (fuse_is_bad(inode))
 		return ERR_PTR(-EIO);
 
-	if (!fc->posix_acl || fc->no_getxattr)
+	if (fc->no_getxattr)
 		return NULL;
 
 	if (type == ACL_TYPE_ACCESS)
@@ -53,6 +54,46 @@ struct posix_acl *fuse_get_acl(struct inode *inode, int type, bool rcu)
 	return acl;
 }
 
+static inline bool fuse_no_acl(const struct fuse_conn *fc,
+			       const struct inode *inode)
+{
+	/*
+	 * Refuse interacting with POSIX ACLs for daemons that
+	 * don't support FUSE_POSIX_ACL and are not mounted on
+	 * the host to retain backwards compatibility.
+	 */
+	return !fc->posix_acl && (i_user_ns(inode) != &init_user_ns);
+}
+
+struct posix_acl *fuse_get_acl(struct user_namespace *mnt_userns,
+			       struct dentry *dentry, int type)
+{
+	struct inode *inode = d_inode(dentry);
+	struct fuse_conn *fc = get_fuse_conn(inode);
+
+	if (fuse_no_acl(fc, inode))
+		return ERR_PTR(-EOPNOTSUPP);
+
+	return __fuse_get_acl(fc, mnt_userns, inode, type, false);
+}
+
+struct posix_acl *fuse_get_inode_acl(struct inode *inode, int type, bool rcu)
+{
+	struct fuse_conn *fc = get_fuse_conn(inode);
+
+	/*
+	 * FUSE daemons before FUSE_POSIX_ACL was introduced could get and set
+	 * POSIX ACLs without them being used for permission checking by the
+	 * vfs. Retain that behavior for backwards compatibility as there are
+	 * filesystems that do all permission checking for acls in the daemon
+	 * and not in the kernel.
+	 */
+	if (!fc->posix_acl)
+		return ERR_PTR(-EOPNOTSUPP);
+
+	return __fuse_get_acl(fc, &init_user_ns, inode, type, rcu);
+}
+
 int fuse_set_acl(struct user_namespace *mnt_userns, struct dentry *dentry,
 		 struct posix_acl *acl, int type)
 {
@@ -64,7 +105,7 @@ int fuse_set_acl(struct user_namespace *mnt_userns, struct dentry *dentry,
 	if (fuse_is_bad(inode))
 		return -EIO;
 
-	if (!fc->posix_acl || fc->no_setxattr)
+	if (fc->no_setxattr || fuse_no_acl(fc, inode))
 		return -EOPNOTSUPP;
 
 	if (type == ACL_TYPE_ACCESS)
@@ -108,7 +149,13 @@ int fuse_set_acl(struct user_namespace *mnt_userns, struct dentry *dentry,
 	} else {
 		ret = fuse_removexattr(inode, name);
 	}
-	forget_all_cached_acls(inode);
+
+	/*
+	 * Older fuse daemons without FUSE_POSIX_ACL never cached POSIX ACLs.
+	 * Retain that behavior.
+	 */
+	if (fc->posix_acl)
+		forget_all_cached_acls(inode);
 	fuse_invalidate_attr(inode);
 
 	return ret;
