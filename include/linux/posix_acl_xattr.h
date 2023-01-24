@@ -73,7 +73,4 @@ static inline bool posix_acl_dentry_list(struct dentry *dentry)
 	return IS_POSIXACL(d_backing_inode(dentry));
 }
 
-extern const struct xattr_handler posix_acl_access_xattr_handler;
-extern const struct xattr_handler posix_acl_default_xattr_handler;
-
 #endif	/* _POSIX_ACL_XATTR_H */
