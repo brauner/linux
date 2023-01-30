@@ -52,6 +52,7 @@
 #include <linux/quotaops.h>
 #include <linux/security.h>
 #include <linux/posix_acl_xattr.h>
+#include <linux/xattr.h>
 
 #define PRIVROOT_NAME ".reiserfs_priv"
 #define XAROOT_NAME   "xattrs"
@@ -770,23 +771,49 @@ out:
 			(handler) != NULL;			\
 			(handler) = *(handlers)++)
 
-/* This is the implementation for the xattr plugin infrastructure */
-static inline const struct xattr_handler *
-find_xattr_handler_prefix(const struct xattr_handler **handlers,
-			   const char *name)
-{
-	const struct xattr_handler *xah;
+static const struct xattr_handler *reiserfs_xattr_handlers_max[] = {
+#ifdef CONFIG_REISERFS_FS_POSIX_ACL
+	&posix_acl_access_xattr_handler,
+	&posix_acl_default_xattr_handler,
+#endif
+#ifdef CONFIG_REISERFS_FS_XATTR
+	&reiserfs_xattr_user_handler,
+	&reiserfs_xattr_trusted_handler,
+#endif
+#ifdef CONFIG_REISERFS_FS_SECURITY
+	&reiserfs_xattr_security_handler,
+#endif
+	NULL
+};
 
-	if (!handlers)
-		return NULL;
+/* Actual operations that are exported to VFS-land */
+#ifdef CONFIG_REISERFS_FS_POSIX_ACL
+const struct xattr_handler **reiserfs_xattr_handlers =
+	reiserfs_xattr_handlers_max + 2;
+#else
+const struct xattr_handler **reiserfs_xattr_handlers =
+	reiserfs_xattr_handlers_max;
+#endif
+
+/* This is the implementation for the xattr plugin infrastructure */
+static inline bool reiserfs_xattr_list(const char *name, struct dentry *dentry)
+{
+	const struct xattr_handler *xah = NULL;
+	const struct xattr_handler **handlers = reiserfs_xattr_handlers_max;
 
 	for_each_xattr_handler(handlers, xah) {
 		const char *prefix = xattr_prefix(xah);
-		if (strncmp(prefix, name, strlen(prefix)) == 0)
-			break;
+
+		if (strncmp(prefix, name, strlen(prefix)))
+			continue;
+
+		if (!xattr_handler_can_list(xah, dentry))
+			return false;
+
+		return true;
 	}
 
-	return xah;
+	return false;
 }
 
 struct listxattr_buf {
@@ -807,12 +834,7 @@ static bool listxattr_filler(struct dir_context *ctx, const char *name,
 
 	if (name[0] != '.' ||
 	    (namelen != 1 && (name[1] != '.' || namelen != 2))) {
-		const struct xattr_handler *handler;
-
-		handler = find_xattr_handler_prefix(b->dentry->d_sb->s_xattr,
-						    name);
-		if (!handler /* Unsupported xattr name */ ||
-		    (handler->list && !handler->list(b->dentry)))
+		if (!reiserfs_xattr_list(name, b->dentry))
 			return true;
 		size = namelen + 1;
 		if (b->buf) {
@@ -901,22 +923,6 @@ int __init reiserfs_xattr_register_handlers(void) { return 0; }
 void reiserfs_xattr_unregister_handlers(void) {}
 static int create_privroot(struct dentry *dentry) { return 0; }
 #endif
-
-/* Actual operations that are exported to VFS-land */
-const struct xattr_handler *reiserfs_xattr_handlers[] = {
-#ifdef CONFIG_REISERFS_FS_XATTR
-	&reiserfs_xattr_user_handler,
-	&reiserfs_xattr_trusted_handler,
-#endif
-#ifdef CONFIG_REISERFS_FS_SECURITY
-	&reiserfs_xattr_security_handler,
-#endif
-#ifdef CONFIG_REISERFS_FS_POSIX_ACL
-	&posix_acl_access_xattr_handler,
-	&posix_acl_default_xattr_handler,
-#endif
-	NULL
-};
 
 static int xattr_mount_check(struct super_block *s)
 {
