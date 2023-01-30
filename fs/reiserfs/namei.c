@@ -378,12 +378,12 @@ static struct dentry *reiserfs_lookup(struct inode *dir, struct dentry *dentry,
 
 		/*
 		 * Propagate the private flag so we know we're
-		 * in the priv tree.  Also clear IOP_XATTR
+		 * in the priv tree.  Also clear xattrs
 		 * since we don't have xattrs on xattr files.
 		 */
 		if (IS_PRIVATE(dir)) {
 			inode->i_flags |= S_PRIVATE;
-			inode->i_opflags &= ~IOP_XATTR;
+			inode_xattr_disable(inode);
 		}
 	}
 	reiserfs_write_unlock(dir->i_sb);

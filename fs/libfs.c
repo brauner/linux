@@ -23,6 +23,7 @@
 #include <linux/fsnotify.h>
 #include <linux/unicode.h>
 #include <linux/fscrypt.h>
+#include <linux/xattr.h>
 
 #include <linux/uaccess.h>
 
@@ -1375,7 +1376,7 @@ void make_empty_dir_inode(struct inode *inode)
 	inode->i_blocks = 0;
 
 	inode->i_op = &empty_dir_inode_operations;
-	inode->i_opflags &= ~IOP_XATTR;
+	inode_xattr_disable(inode);
 	inode->i_fop = &empty_dir_operations;
 }
 

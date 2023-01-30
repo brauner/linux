@@ -2089,7 +2089,7 @@ int reiserfs_new_inode(struct reiserfs_transaction_handle *th,
 	 */
 	if (IS_PRIVATE(dir) || dentry == REISERFS_SB(sb)->priv_root) {
 		inode->i_flags |= S_PRIVATE;
-		inode->i_opflags &= ~IOP_XATTR;
+		inode_xattr_disable(inode);
 	}
 
 	if (reiserfs_posixacl(inode->i_sb)) {

@@ -5840,7 +5840,7 @@ static struct inode *new_simple_dir(struct super_block *s,
 	 * associated with the dentry
 	 */
 	inode->i_op = &simple_dir_inode_operations;
-	inode->i_opflags &= ~IOP_XATTR;
+	inode_xattr_disable(inode);
 	inode->i_fop = &simple_dir_operations;
 	inode->i_mode = S_IFDIR | S_IRUGO | S_IWUSR | S_IXUGO;
 	inode->i_mtime = current_time(inode);

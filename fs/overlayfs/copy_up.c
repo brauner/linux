@@ -81,8 +81,8 @@ int ovl_copy_xattr(struct super_block *sb, const struct path *oldpath, struct de
 	int error = 0;
 	size_t slen;
 
-	if (!(old->d_inode->i_opflags & IOP_XATTR) ||
-	    !(new->d_inode->i_opflags & IOP_XATTR))
+	if (inode_xattr_disabled(old->d_inode) ||
+	    inode_xattr_disabled(new->d_inode))
 		return 0;
 
 	list_size = vfs_listxattr(old, NULL, 0);

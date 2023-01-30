@@ -16,6 +16,7 @@
 #include <linux/namei.h>
 #include <linux/poll.h>
 #include <linux/fiemap.h>
+#include <linux/xattr.h>
 
 static int bad_file_open(struct inode *inode, struct file *filp)
 {
@@ -212,7 +213,7 @@ void make_bad_inode(struct inode *inode)
 	inode->i_atime = inode->i_mtime = inode->i_ctime =
 		current_time(inode);
 	inode->i_op = &bad_inode_ops;	
-	inode->i_opflags &= ~IOP_XATTR;
+	inode_xattr_disable(inode);
 	inode->i_fop = &bad_file_ops;	
 }
 EXPORT_SYMBOL(make_bad_inode);

@@ -889,7 +889,7 @@ static int create_privroot(struct dentry *dentry)
 	}
 
 	d_inode(dentry)->i_flags |= S_PRIVATE;
-	d_inode(dentry)->i_opflags &= ~IOP_XATTR;
+	inode_xattr_disable(d_inode(dentry));
 	reiserfs_info(dentry->d_sb, "Created %s - reserved for xattr "
 		      "storage.\n", PRIVROOT_NAME);
 
@@ -977,7 +977,7 @@ int reiserfs_lookup_privroot(struct super_block *s)
 		d_set_d_op(dentry, &xattr_lookup_poison_ops);
 		if (d_really_is_positive(dentry)) {
 			d_inode(dentry)->i_flags |= S_PRIVATE;
-			d_inode(dentry)->i_opflags &= ~IOP_XATTR;
+			inode_xattr_disable(d_inode(dentry));
 		}
 	} else
 		err = PTR_ERR(dentry);

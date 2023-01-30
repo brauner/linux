@@ -109,5 +109,16 @@ ssize_t simple_xattr_list(struct inode *inode, struct simple_xattrs *xattrs,
 			  char *buffer, size_t size);
 void simple_xattr_add(struct simple_xattrs *xattrs,
 		      struct simple_xattr *new_xattr);
+static inline void inode_xattr_disable(struct inode *inode)
+{
+	inode->i_opflags &= ~IOP_XATTR;
+	inode->i_opflags |= IOP_NOACL;
+}
+
+static inline bool inode_xattr_disabled(struct inode *inode)
+{
+	return !(inode->i_opflags & IOP_XATTR) &&
+	       (inode->i_opflags & IOP_NOACL);
+}
 
 #endif	/* _LINUX_XATTR_H */
