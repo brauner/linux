@@ -773,8 +773,8 @@ out:
 
 static const struct xattr_handler *reiserfs_xattr_handlers_max[] = {
 #ifdef CONFIG_REISERFS_FS_POSIX_ACL
-	&posix_acl_access_xattr_handler,
-	&posix_acl_default_xattr_handler,
+	&nop_posix_acl_access,
+	&nop_posix_acl_default,
 #endif
 #ifdef CONFIG_REISERFS_FS_XATTR
 	&reiserfs_xattr_user_handler,
