@@ -935,6 +935,62 @@ static void attach_mnt(struct mount *mnt,
 	__attach_mnt(mnt, parent);
 }
 
+/**
+ * mnt_tuck_mountpoint - tuck a mount beneath another one
+ *
+ * @tucked_mnt: the mount to tuck
+ * @top_mnt:	the mount to tuck @tucked_mnt under
+ * @tucked_mp:	the new mountpoint of @top_mnt on @tucked_mnt
+ *
+ * Remove @top_mnt from its current mountpoint @top_mnt->mnt_mp and
+ * parent @top_mnt->mnt_parent and mount it on top of @tucked_mnt at
+ * @tucked_mp. And mount @tucked_mnt on the old parent and old
+ * mountpoint of @top_mnt.
+ *
+ * Note that we keep the reference count in tact when we remove @top_mnt
+ * from its old mountpoint and parent to prevent UAF issues. Once we've
+ * mounted @top_mnt on @tucked_mnt the reference count gets bumped once
+ * more. So make sure that we drop it to not leak the mount and
+ * mountpoint.
+ */
+static void mnt_tuck_mountpoint(struct mount *tucked_mnt, struct mount *top_mnt,
+				struct mountpoint *tucked_mp)
+{
+	struct mount *old_top_parent = top_mnt->mnt_parent;
+	struct mountpoint *old_top_mp;
+
+	old_top_mp = unhash_mnt(top_mnt);
+	attach_mnt(top_mnt, tucked_mnt, tucked_mp);
+	mnt_set_mountpoint(old_top_parent, old_top_mp, tucked_mnt);
+	put_mountpoint(old_top_mp);
+	mnt_add_count(old_top_parent, -1);
+}
+
+/**
+ * tuck_mnt - tuck a mount beneath another one, attach to
+ *            @mount_hashtable and parent's list of child mounts
+ *
+ * @tucked_mnt: the mount to tuck
+ * @top_mnt:	the mount to tuck @tucked_mnt under
+ * @tucked_mp:	the new mountpoint of @top_mnt on @tucked_mnt
+ *
+ * Remove @top_mnt from its current parent and mountpoint and mount it
+ * on @tucked_mp on @tucked_mnt, and mount @tucked_mnt on the old
+ * parent and old mountpoint of @top_mnt. Finally, attach @tucked_mnt
+ * mount to @mnt_hashtable and @tucked_mnt->mnt_parent->mnt_mounts.
+ *
+ * Note, when we call __attach_mnt() we've already mounted @tucked_mnt
+ * on top of @top_mnt's old parent so @tucked_mnt->mnt_parent will point
+ * to the correct parent.
+ */
+static void tuck_mnt(struct mount *tucked_mnt,
+		     struct mount *top_mnt,
+		     struct mountpoint *tucked_mp)
+{
+	mnt_tuck_mountpoint(tucked_mnt, top_mnt, tucked_mp);
+	__attach_mnt(tucked_mnt, tucked_mnt->mnt_parent);
+}
+
 void mnt_change_mountpoint(struct mount *parent, struct mountpoint *mp, struct mount *mnt)
 {
 	struct mountpoint *old_mp = mnt->mnt_mp;
@@ -2154,12 +2210,16 @@ int count_mounts(struct mnt_namespace *ns, struct mount *mnt)
 	return 0;
 }
 
+typedef enum mnt_tree_flags_t {
+	MNT_TREE_MOVE	= BIT(0),
+	MNT_TREE_TUCK	= BIT(1),
+} mnt_tree_flags_t;
+
 /*
  *  @source_mnt : mount tree to be attached
- *  @nd         : place the mount tree @source_mnt is attached
- *  @parent_nd  : if non-null, detach the source_mnt from its parent and
- *  		   store the parent mount and mountpoint dentry.
- *  		   (done when source_mnt is moved)
+ *  @top_mnt	: mount that @source_mnt will be mounted on or tucked under
+ *  @dest_mp	: the mountpoint @source_mnt will be mounted at
+ *  @flags	: modify how @source_mnt is supposed to be attached
  *
  *  NOTE: in the table below explains the semantics when a source mount
  *  of a given type is attached to a destination mount of a given type.
@@ -2218,17 +2278,18 @@ int count_mounts(struct mnt_namespace *ns, struct mount *mnt)
  * in allocations.
  */
 static int attach_recursive_mnt(struct mount *source_mnt,
-			struct mount *dest_mnt,
-			struct mountpoint *dest_mp,
-			bool moving)
+				struct mount *top_mnt,
+				struct mountpoint *dest_mp,
+				mnt_tree_flags_t flags)
 {
 	struct user_namespace *user_ns = current->nsproxy->mnt_ns->user_ns;
 	HLIST_HEAD(tree_list);
-	struct mnt_namespace *ns = dest_mnt->mnt_ns;
+	struct mnt_namespace *ns = top_mnt->mnt_ns;
 	struct mountpoint *smp;
-	struct mount *child, *p;
+	struct mount *child, *dest_mnt, *p;
 	struct hlist_node *n;
-	int err;
+	int err = 0;
+	bool moving = flags & MNT_TREE_MOVE, tuck = flags & MNT_TREE_TUCK;
 
 	/* Preallocate a mountpoint in case the new mounts need
 	 * to be tucked under other mounts.
@@ -2244,29 +2305,48 @@ static int attach_recursive_mnt(struct mount *source_mnt,
 			goto out;
 	}
 
+	if (tuck)
+		dest_mnt = top_mnt->mnt_parent;
+	else
+		dest_mnt = top_mnt;
+
 	if (IS_MNT_SHARED(dest_mnt)) {
 		err = invent_group_ids(source_mnt, true);
 		if (err)
 			goto out;
 		err = propagate_mnt(dest_mnt, dest_mp, source_mnt, &tree_list);
-		lock_mount_hash();
-		if (err)
-			goto out_cleanup_ids;
+	}
+	lock_mount_hash();
+	if (err)
+		goto out_cleanup_ids;
+
+	/* Recheck with lock_mount_hash() held. */
+	if (tuck && IS_MNT_LOCKED(top_mnt)) {
+		err = -EINVAL;
+		goto out_cleanup_ids;
+	}
+
+	if (IS_MNT_SHARED(dest_mnt)) {
 		for (p = source_mnt; p; p = next_mnt(p, source_mnt))
 			set_mnt_shared(p);
-	} else {
-		lock_mount_hash();
 	}
+
 	if (moving) {
 		unhash_mnt(source_mnt);
-		attach_mnt(source_mnt, dest_mnt, dest_mp);
+		if (tuck)
+			tuck_mnt(source_mnt, top_mnt, smp);
+		else
+			attach_mnt(source_mnt, dest_mnt, dest_mp);
 		touch_mnt_namespace(source_mnt->mnt_ns);
 	} else {
 		if (source_mnt->mnt_ns) {
 			/* move from anon - the caller will destroy */
 			list_del_init(&source_mnt->mnt_ns->list);
 		}
-		mnt_set_mountpoint(dest_mnt, dest_mp, source_mnt);
+		if (tuck)
+			mnt_tuck_mountpoint(source_mnt, top_mnt, smp);
+		else
+			mnt_set_mountpoint(dest_mnt, dest_mp, source_mnt);
 		commit_tree(source_mnt);
 	}
 
@@ -2306,14 +2386,35 @@ static int attach_recursive_mnt(struct mount *source_mnt,
 	return err;
 }
 
-static struct mountpoint *lock_mount(struct path *path)
+/**
+ * lock_mount_mountpoint - lock mount and mountpoint
+ * @path: target path
+ * @tuck: whether we intend to tuck a mount beneath @path
+ *
+ * Follow the mount stack on @path until the top mount is found.
+ *
+ * If we intend to mount on top of @path->mnt acquire the inode_lock()
+ * for the top mount's ->mnt_root to protect against concurrent removal
+ * of our prospective mountpoint from another mount namespace.
+ *
+ * If we intend to tuck beneath the top mount @m acquire the
+ * inode_lock() on @m's mountpoint @mp on @m->mnt_parent. Otherwise we
+ * risk racing with someone who unlinked @mp from another mount
+ * namespace where @m doesn't have a child mount mounted @mp. We don't
+ * care if @m->mnt_root/@path->dentry is removed (as long as
+ * @path->dentry isn't equal to @m->mnt_mountpoint of course).
+ *
+ * Return: Either the target mountpoint on the top mount or the top
+ *         mount's mountpoint.
+ */
+static struct mountpoint *lock_mount_mountpoint(struct path *path, bool tuck)
 {
 	struct vfsmount *mnt = path->mnt;
 	struct dentry *dentry;
 	struct mountpoint *mp;
 
 	for (;;) {
-		dentry = path->dentry;
+		dentry = tuck ? real_mount(mnt)->mnt_mountpoint : path->dentry;
 		inode_lock(dentry->d_inode);
 		if (unlikely(cant_mount(dentry))) {
 			inode_unlock(dentry->d_inode);
@@ -2343,6 +2444,11 @@ static struct mountpoint *lock_mount(struct path *path)
 	return mp;
 }
 
+static inline struct mountpoint *lock_mount(struct path *path)
+{
+	return lock_mount_mountpoint(path, false);
+}
+
 static void unlock_mount(struct mountpoint *where)
 {
 	struct dentry *dentry = where->m_dentry;
@@ -2364,7 +2470,7 @@ static int graft_tree(struct mount *mnt, struct mount *p, struct mountpoint *mp)
 	      d_is_dir(mnt->mnt.mnt_root))
 		return -ENOTDIR;
 
-	return attach_recursive_mnt(mnt, p, mp, false);
+	return attach_recursive_mnt(mnt, p, mp, 0);
 }
 
 /*
@@ -2849,7 +2955,64 @@ out:
 	return err;
 }
 
-static int do_move_mount(struct path *old_path, struct path *new_path)
+/**
+ * can_tuck_mount - check that we can tuck a mount
+ * @from: mount to tuck under
+ * @to:   mount under which to tuck
+ *
+ * - Make sure that the mount to tuck under isn't a shared mount so we
+ *   force the kernel to allocate a new peer group id. This simplifies
+ *   the mount trees that can be created and limits propagation events
+ *   in cases where @to, and/or @to->mnt_parent are in the same peer
+ *   group. Something that's a nuisance already today.
+ * - Make sure that @to->dentry is actually the root of a mount under
+ *   which we can tuck another mount.
+ * - Make sure that nothing can be tucked under the caller's current
+ *   root or the rootfs of the namespace.
+ * - Make sure that the caller can unmount the topmost mount ensuring
+ *   that the caller could reveal the underlying mountpoint.
+ *
+ * Return: On success 0, and on error a negative error code is returned.
+ */
+static int can_tuck_mount(struct path *from, struct path *to)
+{
+	struct mount *mnt_from = real_mount(from->mnt),
+		     *mnt_to = real_mount(to->mnt);
+
+	if (!check_mnt(mnt_to))
+		return -EINVAL;
+
+	if (!mnt_has_parent(mnt_to))
+		return -EINVAL;
+
+	if (IS_MNT_SHARED(mnt_from))
+		return -EINVAL;
+
+	if (!path_mounted(to))
+		return -EINVAL;
+
+	if (mnt_from == mnt_to)
+		return -EINVAL;
+
+	/*
+	 * Tucking a mount beneath the rootfs only makes sense when the
+	 * tuck semantics of pivot_root(".", ".") are used.
+	 */
+	if (&mnt_to->mnt == current->fs->root.mnt)
+		return -EINVAL;
+	if (mnt_to->mnt_parent == current->nsproxy->mnt_ns->root)
+		return -EINVAL;
+
+	for (struct mount *p = mnt_from; mnt_has_parent(p); p = p->mnt_parent)
+		if (p == mnt_to)
+			return -EINVAL;
+
+	/* Ensure the caller could reveal the underlying mount. */
+	return can_umount(to, 0);
+}
+
+static int do_move_mount(struct path *old_path, struct path *new_path,
+			 bool tuck)
 {
 	struct mnt_namespace *ns;
 	struct mount *p;
@@ -2858,8 +3021,9 @@ static int do_move_mount(struct path *old_path, struct path *new_path)
 	struct mountpoint *mp, *old_mp;
 	int err;
 	bool attached;
+	mnt_tree_flags_t flags = 0;
 
-	mp = lock_mount(new_path);
+	mp = lock_mount_mountpoint(new_path, tuck);
 	if (IS_ERR(mp))
 		return PTR_ERR(mp);
 
@@ -2867,8 +3031,19 @@ static int do_move_mount(struct path *old_path, struct path *new_path)
 	p = real_mount(new_path->mnt);
 	parent = old->mnt_parent;
 	attached = mnt_has_parent(old);
+	if (attached)
+		flags |= MNT_TREE_MOVE;
 	old_mp = old->mnt_mp;
 	ns = old->mnt_ns;
+
+	if (tuck) {
+		err = can_tuck_mount(old_path, new_path);
+		if (err)
+			goto out;
+
+		p = p->mnt_parent;
+		flags |= MNT_TREE_TUCK;
+	}
 
 	err = -EINVAL;
 	/* The mountpoint must be in our namespace. */
@@ -2910,8 +3085,7 @@ static int do_move_mount(struct path *old_path, struct path *new_path)
 		if (p == old)
 			goto out;
 
-	err = attach_recursive_mnt(old, real_mount(new_path->mnt), mp,
-				   attached);
+	err = attach_recursive_mnt(old, real_mount(new_path->mnt), mp, flags);
 	if (err)
 		goto out;
 
@@ -2943,7 +3117,7 @@ static int do_move_mount_old(struct path *path, const char *old_name)
 	if (err)
 		return err;
 
-	err = do_move_mount(&old_path, path);
+	err = do_move_mount(&old_path, path, false);
 	path_put(&old_path);
 	return err;
 }
@@ -3807,6 +3981,10 @@ SYSCALL_DEFINE5(move_mount,
 	if (flags & ~MOVE_MOUNT__MASK)
 		return -EINVAL;
 
+	if ((flags & (MOVE_MOUNT_TUCK | MOVE_MOUNT_SET_GROUP)) ==
+	    (MOVE_MOUNT_TUCK | MOVE_MOUNT_SET_GROUP))
+		return -EINVAL;
+
 	/* If someone gives a pathname, they aren't permitted to move
 	 * from an fd that requires unmount as we can't get at the flag
 	 * to clear it afterwards.
@@ -3836,7 +4014,8 @@ SYSCALL_DEFINE5(move_mount,
 	if (flags & MOVE_MOUNT_SET_GROUP)
 		ret = do_set_group(&from_path, &to_path);
 	else
-		ret = do_move_mount(&from_path, &to_path);
+		ret = do_move_mount(&from_path, &to_path,
+				    (flags & MOVE_MOUNT_TUCK));
 
 out_to:
 	path_put(&to_path);
