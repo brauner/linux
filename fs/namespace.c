@@ -658,9 +658,16 @@ static bool legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 	return false;
 }
 
-/*
- * find the first mount at @dentry on vfsmount @mnt.
- * call under rcu_read_lock()
+/**
+ * __lookup_mnt - find child mount
+ * @mnt:	parent mount
+ * @dentry:	mountpoint
+ *
+ * If @mnt has a child mount mounted @dentry find and return it. If a
+ * mount is found it is unique, i.e., there are no shadow child mounts
+ * with @mnt as parent and mounted at @dentry.
+ *
+ * Return: The child of @mnt mounted @dentry or NULL if there is none.
  */
 struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 {
