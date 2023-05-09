@@ -550,11 +550,11 @@ from ->follow_link for normal symlinks, or nd_jump_link for magic
 **mandatory**
 
 iget5_locked()/ilookup5()/ilookup5_nowait() test() callback used to be
-called with both ->i_lock and inode_hash_lock held; the former is *not*
+called with both ->i_lock and hlist_bl_lock() held; the former is *not*
 taken anymore, so verify that your callbacks do not rely on it (none
-of the in-tree instances did).  inode_hash_lock is still held,
-of course, so they are still serialized wrt removal from inode hash,
-as well as wrt set() callback of iget5_locked().
+of the in-tree instances did).  hlist_bl_lock() is still held,
+of course, so they are still serialized wrt removal from inode hash
+chain, as well as wrt set() callback of iget5_locked().
 
 ---
 
