@@ -222,6 +222,7 @@ static loff_t ovl_llseek(struct file *file, loff_t offset, int whence)
 static void ovl_file_accessed(struct file *file)
 {
 	struct inode *inode, *upperinode;
+	struct timespec64 ctime, uctime;
 
 	if (file->f_flags & O_NOATIME)
 		return;
@@ -232,10 +233,12 @@ static void ovl_file_accessed(struct file *file)
 	if (!upperinode)
 		return;
 
+	ctime = ctime_peek(inode);
+	uctime = ctime_peek(upperinode);
 	if ((!timespec64_equal(&inode->i_mtime, &upperinode->i_mtime) ||
-	     !timespec64_equal(&inode->i_ctime, &upperinode->i_ctime))) {
+	     !timespec64_equal(&ctime, &uctime))) {
 		inode->i_mtime = upperinode->i_mtime;
-		inode->i_ctime = upperinode->i_ctime;
+		inode->i_ctime = uctime;
 	}
 
 	touch_atime(&file->f_path);
