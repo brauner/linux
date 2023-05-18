@@ -29,6 +29,7 @@
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
  * @idmap:	idmap of the mount the inode was found from
+ * @req_mask	statx request_mask
  * @inode:	Inode to use as the source
  * @stat:	Where to fill in the attributes
  *
@@ -42,8 +43,8 @@
  * uid and gid filds. On non-idmapped mounts or if permission checking is to be
  * performed on the raw inode simply passs @nop_mnt_idmap.
  */
-void generic_fillattr(struct mnt_idmap *idmap, struct inode *inode,
-		      struct kstat *stat)
+void generic_fillattr(struct mnt_idmap *idmap, u32 request_mask,
+		      struct inode *inode, struct kstat *stat)
 {
 	vfsuid_t vfsuid = i_uid_into_vfsuid(idmap, inode);
 	vfsgid_t vfsgid = i_gid_into_vfsgid(idmap, inode);
@@ -61,6 +62,12 @@ void generic_fillattr(struct mnt_idmap *idmap, struct inode *inode,
 	stat->ctime = inode->i_ctime;
 	stat->blksize = i_blocksize(inode);
 	stat->blocks = inode->i_blocks;
+
+	if ((request_mask & STATX_CHANGE_COOKIE) && IS_I_VERSION(inode)) {
+		stat->result_mask |= STATX_CHANGE_COOKIE;
+		stat->change_cookie = inode_query_iversion(inode);
+	}
+
 }
 EXPORT_SYMBOL(generic_fillattr);
 
@@ -123,17 +130,12 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 	stat->attributes_mask |= (STATX_ATTR_AUTOMOUNT |
 				  STATX_ATTR_DAX);
 
-	if ((request_mask & STATX_CHANGE_COOKIE) && IS_I_VERSION(inode)) {
-		stat->result_mask |= STATX_CHANGE_COOKIE;
-		stat->change_cookie = inode_query_iversion(inode);
-	}
-
 	idmap = mnt_idmap(path->mnt);
 	if (inode->i_op->getattr)
 		return inode->i_op->getattr(idmap, path, stat,
 					    request_mask, query_flags);
 
-	generic_fillattr(idmap, inode, stat);
+	generic_fillattr(idmap, request_mask, inode, stat);
 	return 0;
 }
 EXPORT_SYMBOL(vfs_getattr_nosec);
