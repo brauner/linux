@@ -1474,7 +1474,7 @@ static inline bool fsuidgid_has_mapping(struct super_block *sb,
 	       kgid_has_mapping(fs_userns, kgid);
 }
 
-extern struct timespec64 current_time(struct inode *inode);
+struct timespec64 current_time(struct inode *inode);
 
 /*
  * Snapshotting support.
@@ -2212,6 +2212,7 @@ struct file_system_type {
 #define FS_USERNS_MOUNT		8	/* Can be mounted by userns root */
 #define FS_DISALLOW_NOTIFY_PERM	16	/* Disable fanotify permission events */
 #define FS_ALLOW_IDMAP         32      /* FS has been updated to handle vfs idmappings. */
+#define FS_MULTIGRAIN_TS	64	/* Filesystem uses multigrain timestamps */
 #define FS_RENAME_DOES_D_MOVE	32768	/* FS will handle d_move() during rename() internally. */
 	int (*init_fs_context)(struct fs_context *);
 	const struct fs_parameter_spec *parameters;
@@ -2234,6 +2235,67 @@ struct file_system_type {
 };
 
 #define MODULE_ALIAS_FS(NAME) MODULE_ALIAS("fs-" NAME)
+
+/*
+ * Multigrain timestamps
+ *
+ * Conditionally use fine-grained ctime and mtime timestamps when there
+ * are users actively observing them via getattr. The primary use-case
+ * for this is NFS clients that use the ctime to distinguish between
+ * different states of the file, and that are often fooled by multiple
+ * operations that occur in the same coarse-grained timer tick.
+ */
+static inline bool is_multigrain_ts(const struct inode *inode)
+{
+	return inode->i_sb->s_type->fs_flags & FS_MULTIGRAIN_TS;
+}
+
+/*
+ * The kernel always keeps normalized struct timespec64 values in the ctime,
+ * which means that only the first 30 bits of the value are used. Use the
+ * 31st bit of the ctime's tv_nsec field as a flag to indicate that the value
+ * has been queried since it was last updated.
+ */
+#define I_CTIME_QUERIED		(1L<<30)
+
+/**
+ * ctime_nsec_peek - peek at (but don't query) the ctime tv_nsec field
+ * @inode: inode to fetch the ctime from
+ *
+ * Grab the current ctime tv_nsec field from the inode, mask off the
+ * I_CTIME_QUERIED flag and return it. This is mostly intended for use by
+ * internal consumers of the ctime that aren't concerned with ensuring a
+ * fine-grained update on the next change (e.g. when preparing to store
+ * the value in the backing store for later retrieval).
+ *
+ * This is safe to call regardless of whether the underlying filesystem
+ * is using multigrain timestamps.
+ */
+static inline long ctime_nsec_peek(const struct inode *inode)
+{
+	return inode->i_ctime.tv_nsec &~ I_CTIME_QUERIED;
+}
+
+/**
+ * ctime_peek - peek at (but don't query) the ctime
+ * @inode: inode to fetch the ctime from
+ *
+ * Grab the current ctime from the inode, sans I_CTIME_QUERIED flag. For
+ * use by internal consumers that don't require a fine-grained update on
+ * the next change.
+ *
+ * This is safe to call regardless of whether the underlying filesystem
+ * is using multigrain timestamps.
+ */
+static inline struct timespec64 ctime_peek(const struct inode *inode)
+{
+	struct timespec64 ctime;
+
+	ctime.tv_sec = inode->i_ctime.tv_sec;
+	ctime.tv_nsec = ctime_nsec_peek(inode);
+
+	return ctime;
+}
 
 extern struct dentry *mount_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
@@ -2857,6 +2919,8 @@ extern void page_put_link(void *);
 extern int page_symlink(struct inode *inode, const char *symname, int len);
 extern const struct inode_operations page_symlink_inode_operations;
 extern void kfree_link(void *);
+void fill_multigrain_cmtime(u32 request_mask, struct inode *inode,
+			    struct kstat *stat);
 void generic_fillattr(struct mnt_idmap *, u32, struct inode *, struct kstat *);
 void generic_fill_statx_attr(struct inode *inode, struct kstat *stat);
 extern int vfs_getattr_nosec(const struct path *, struct kstat *, u32, unsigned int);
