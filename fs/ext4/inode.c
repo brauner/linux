@@ -4235,6 +4235,19 @@ static int ext4_inode_blocks_set(struct ext4_inode *raw_inode,
 	return 0;
 }
 
+static void ext4_inode_set_ctime(struct inode *inode, struct ext4_inode *raw_inode)
+{
+	struct timespec64 ctime = ctime_peek(inode);
+
+	if (EXT4_FITS_IN_INODE(raw_inode, EXT4_I(inode), i_ctime_extra)) {
+		raw_inode->i_ctime = cpu_to_le32(ctime.tv_sec);
+		raw_inode->i_ctime_extra = ext4_encode_extra_time(&ctime);
+	} else {
+		raw_inode->i_ctime = cpu_to_le32(clamp_t(int32_t,
+					ctime.tv_sec, S32_MIN, S32_MAX));
+	}
+}
+
 static int ext4_fill_raw_inode(struct inode *inode, struct ext4_inode *raw_inode)
 {
 	struct ext4_inode_info *ei = EXT4_I(inode);
@@ -4275,7 +4288,7 @@ static int ext4_fill_raw_inode(struct inode *inode, struct ext4_inode *raw_inode
 	}
 	raw_inode->i_links_count = cpu_to_le16(inode->i_nlink);
 
-	EXT4_INODE_SET_XTIME(i_ctime, inode, raw_inode);
+	ext4_inode_set_ctime(inode, raw_inode);
 	EXT4_INODE_SET_XTIME(i_mtime, inode, raw_inode);
 	EXT4_INODE_SET_XTIME(i_atime, inode, raw_inode);
 	EXT4_EINODE_SET_XTIME(i_crtime, ei, raw_inode);
@@ -4983,7 +4996,7 @@ static void __ext4_update_other_inode_time(struct super_block *sb,
 		spin_unlock(&inode->i_lock);
 
 		spin_lock(&ei->i_raw_lock);
-		EXT4_INODE_SET_XTIME(i_ctime, inode, raw_inode);
+		ext4_inode_set_ctime(inode, raw_inode);
 		EXT4_INODE_SET_XTIME(i_mtime, inode, raw_inode);
 		EXT4_INODE_SET_XTIME(i_atime, inode, raw_inode);
 		ext4_inode_csum_set(inode, raw_inode, ei);
