@@ -624,9 +624,14 @@ void fh_fill_pre_attrs(struct svc_fh *fhp)
 	inode = d_inode(fhp->fh_dentry);
 	err = fh_getattr(fhp, &stat);
 	if (err) {
-		/* Grab the times from inode anyway */
+		/*
+		 * Grab the times from inode anyway.
+		 *
+		 * FIXME: is this the right thing to do? Or should we just
+		 * 	  not send pre and post-op attrs in this case?
+		 */
 		stat.mtime = inode->i_mtime;
-		stat.ctime = inode->i_ctime;
+		stat.ctime = ctime_peek(inode);
 		stat.size  = inode->i_size;
 		if (v4 && IS_I_VERSION(inode)) {
 			stat.change_cookie = inode_query_iversion(inode);
@@ -662,7 +667,7 @@ void fh_fill_post_attrs(struct svc_fh *fhp)
 	err = fh_getattr(fhp, &fhp->fh_post_attr);
 	if (err) {
 		fhp->fh_post_saved = false;
-		fhp->fh_post_attr.ctime = inode->i_ctime;
+		fhp->fh_post_attr.ctime = ctime_peek(inode);
 		if (v4 && IS_I_VERSION(inode)) {
 			fhp->fh_post_attr.change_cookie = inode_query_iversion(inode);
 			fhp->fh_post_attr.result_mask |= STATX_CHANGE_COOKIE;
