@@ -1,0 +1,3 @@
+* Re: [bug report] fs: Restrict lock_two_nondirectories() to non-directory inodes
+  Link: https://lore.kernel.org/linux-fsdevel/20230606095625.zowqbpfi7hktfbwh@quack3
+  was folded into this patch.
