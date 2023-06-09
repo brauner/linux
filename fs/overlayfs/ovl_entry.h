@@ -12,7 +12,7 @@ struct ovl_config {
 	bool default_permissions;
 	bool redirect_dir;
 	bool redirect_follow;
-	const char *redirect_mode;
+	unsigned redirect_mode;
 	bool index;
 	bool uuid;
 	bool nfs_export;
