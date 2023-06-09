@@ -85,6 +85,36 @@ struct ovl_fs {
 	errseq_t errseq;
 };
 
+#define OVL_MAX_STACK 500
+
+struct ovl_fs_context_layer {
+	char *name;
+	struct path path;
+};
+
+/*
+ * These options imply different behavior when they are explicitly
+ * specified than when they are left in their default state.
+ */
+#define OVL_METACOPY_SET	BIT(0)
+#define OVL_REDIRECT_SET	BIT(1)
+#define OVL_NFS_EXPORT_SET	BIT(2)
+#define OVL_INDEX_SET		BIT(3)
+
+struct ovl_fs_context {
+	struct path upper;
+	struct path work;
+	size_t capacity;
+	size_t nr;
+	u8 set;
+	struct ovl_fs_context_layer *lower;
+};
+
+int ovl_parse_param_upperdir(const char *name, struct fs_context *fc,
+			     bool workdir);
+int ovl_parse_param_lowerdir(const char *name, struct fs_context *fc);
+void ovl_parse_param_drop_lowerdir(struct ovl_fs_context *ctx);
+
 static inline struct vfsmount *ovl_upper_mnt(struct ovl_fs *ofs)
 {
 	return ofs->layers[0].mnt;
