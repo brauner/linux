@@ -119,6 +119,29 @@ struct ovl_fh {
 #define OVL_FH_FID_OFFSET	(OVL_FH_WIRE_OFFSET + \
 				 offsetof(struct ovl_fb, fid))
 
+/* params.c */
+#define OVL_MAX_STACK 500
+
+struct ovl_fs_context_layer {
+	char *name;
+	struct path path;
+};
+
+struct ovl_fs_context {
+	struct path upper;
+	struct path work;
+	size_t capacity;
+	size_t nr; /* includes nr_data */
+	size_t nr_data;
+	u8 set;
+	struct ovl_fs_context_layer *lower;
+};
+
+int ovl_parse_param_upperdir(const char *name, struct fs_context *fc,
+			     bool workdir);
+int ovl_parse_param_lowerdir(const char *name, struct fs_context *fc);
+void ovl_parse_param_drop_lowerdir(struct ovl_fs_context *ctx);
+
 extern const char *const ovl_xattr_table[][2];
 static inline const char *ovl_xattr(struct ovl_fs *ofs, enum ovl_xattr ox)
 {
