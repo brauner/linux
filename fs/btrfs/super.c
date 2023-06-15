@@ -6,6 +6,8 @@
 #include <linux/blkdev.h>
 #include <linux/module.h>
 #include <linux/fs.h>
+#include <linux/fs_context.h>
+#include <linux/fs_parser.h>
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
 #include <linux/time.h>
@@ -75,6 +77,16 @@ static const struct super_operations btrfs_super_ops;
 static struct file_system_type btrfs_fs_type;
 static struct file_system_type btrfs_root_fs_type;
 
+/* Let the btrfs_fs_context hold all mount options. */
+struct btrfs_fs_context {
+	bool prepare_sb;
+	/* subvolume mount options */
+	char *subvol_name;
+	u64 subvol_id;
+	/* device mount options */
+	/* generic mount options */
+};
+
 static int btrfs_remount(struct super_block *sb, int *flags, char *data);
 
 static void btrfs_put_super(struct super_block *sb)
@@ -83,10 +95,12 @@ static void btrfs_put_super(struct super_block *sb)
 }
 
 enum {
-	Opt_acl, Opt_noacl,
+	Opt_acl,
 	Opt_clear_cache,
 	Opt_commit_interval,
 	Opt_compress,
+
+	Opt_noacl,
 	Opt_compress_force,
 	Opt_compress_force_type,
 	Opt_compress_type,
@@ -144,10 +158,11 @@ enum {
 
 static const match_table_t tokens = {
 	{Opt_acl, "acl"},
-	{Opt_noacl, "noacl"},
 	{Opt_clear_cache, "clear_cache"},
 	{Opt_commit_interval, "commit=%u"},
 	{Opt_compress, "compress"},
+
+	{Opt_noacl, "noacl"},
 	{Opt_compress_type, "compress=%s"},
 	{Opt_compress_force, "compress-force"},
 	{Opt_compress_force_type, "compress-force=%s"},
@@ -217,14 +232,100 @@ static const match_table_t tokens = {
 };
 
 static const match_table_t rescue_tokens = {
-	{Opt_usebackuproot, "usebackuproot"},
-	{Opt_nologreplay, "nologreplay"},
-	{Opt_ignorebadroots, "ignorebadroots"},
-	{Opt_ignorebadroots, "ibadroots"},
-	{Opt_ignoredatacsums, "ignoredatacsums"},
-	{Opt_ignoredatacsums, "idatacsums"},
-	{Opt_rescue_all, "all"},
-	{Opt_err, NULL},
+        {Opt_usebackuproot, "usebackuproot"},
+        {Opt_nologreplay, "nologreplay"},
+        {Opt_ignorebadroots, "ignorebadroots"},
+        {Opt_ignorebadroots, "ibadroots"},
+        {Opt_ignoredatacsums, "ignoredatacsums"},
+        {Opt_ignoredatacsums, "idatacsums"},
+        {Opt_rescue_all, "all"},
+        {Opt_err, NULL},
+};
+
+enum {
+	BTRFS_PARAM_RESCUE_USEBACKUPROOT,
+	BTRFS_PARAM_RESCUE_NOLOGREPLAY,
+	BTRFS_PARAM_RESCUE_IGNOREBADROOTS_1,
+	BTRFS_PARAM_RESCUE_IGNOREBADROOTS_2,
+	BTRFS_PARAM_RESCUE_IGNOREDATACSUMS_1,
+	BTRFS_PARAM_RESCUE_IGNOREDATACSUMS_2,
+	BTRFS_PARAM_RESCUE_RESCUE_ALL,
+};
+
+static const struct constant_table btrfs_rescue_parameters[] = {
+	{ "usebackuproot",	BTRFS_PARAM_RESCUE_USEBACKUPROOT     },
+	{ "nologreplay",	BTRFS_PARAM_RESCUE_NOLOGREPLAY	     },
+	{ "ignorebadroots",	BTRFS_PARAM_RESCUE_IGNOREBADROOTS_1  },
+	{ "ibadroots",		BTRFS_PARAM_RESCUE_IGNOREBADROOTS_2  },
+	{ "ignoredatacsums",	BTRFS_PARAM_RESCUE_IGNOREDATACSUMS_1 },
+	{ "idatacsums",		BTRFS_PARAM_RESCUE_IGNOREDATACSUMS_2 },
+	{ "all",		BTRFS_PARAM_RESCUE_RESCUE_ALL	     },
+	{}
+};
+
+#define fsparam_string_empty(NAME, OPT) \
+	__fsparam(fs_param_is_string, NAME, OPT, fs_param_can_be_empty, NULL)
+
+static const struct fs_parameter_spec btrfs_parameter_spec[] = {
+	fsparam_flag_no("acl",			Opt_acl),
+	fsparam_flag("clear_cache",		Opt_clear_cache),
+	fsparam_u32("commit",			Opt_commit_interval),
+	fsparam_string_empty("compress",	Opt_compress),
+	fsparam_string_empty("compress-force",	Opt_compress_force),
+	fsparam_flag("degraded",		Opt_degraded),
+	fsparam_string("device",		Opt_device),
+	fsparam_string("fatal_errors",		Opt_fatal_errors),
+	fsparam_flag_no("flushoncommit",	Opt_flushoncommit),
+	fsparam_flag_no("inode_cache",		Opt_inode_cache),
+	fsparam_string("max_inline",		Opt_max_inline),
+	fsparam_flag_no("barrier",		Opt_barrier),
+	fsparam_flag_no("datacow",		Opt_datacow),
+	fsparam_flag_no("datasum",		Opt_datasum),
+	fsparam_flag_no("autodefrag",		Opt_defrag),
+	fsparam_flag_no("discard",		Opt_discard),
+	fsparam_string("discard",		Opt_discard_mode),
+
+	/* norecovery is deprecated */
+	fsparam_flag_no("recovery",		Opt_recovery),
+	fsparam_u32("metadata_ratio",		Opt_ratio),
+	fsparam_flag("rescan_uuid_tree",	Opt_rescan_uuid_tree),
+	fsparam_flag("skip_balance",		Opt_skip_balance),
+	fsparam_flag_no("space_cache",		Opt_space_cache),
+	fsparam_string("space_cache",		Opt_space_cache_version),
+	fsparam_flag_no("ssd",			Opt_ssd),
+	fsparam_flag_no("ssd_spread",		Opt_ssd_spread),
+	fsparam_string_empty("subvol",		Opt_subvol),
+	fsparam_u64("subvolid",			Opt_subvolid),
+	fsparam_u32("thread_pool",		Opt_thread_pool),
+	fsparam_flag_no("treelog",		Opt_treelog),
+	fsparam_flag("user_subvol_rm_allowed",	Opt_user_subvol_rm_allowed),
+
+	/* Rescue options */
+	fsparam_enum("rescue",			Opt_rescue, btrfs_rescue_parameters),
+
+	/* Deprecated, with alias rescue=nologreplay */
+	fsparam_flag("nologreplay",		Opt_nologreplay),
+
+	/* Deprecated, with alias rescue=usebackuproot */
+	fsparam_flag("usebackuproot",		Opt_usebackuproot),
+
+	/* Debugging options */
+	fsparam_flag("check_int",		Opt_check_integrity),
+	fsparam_flag("check_int_data",		Opt_check_integrity_including_extent_data),
+	fsparam_u32("check_int_print_mask",	Opt_check_integrity_print_mask),
+	fsparam_flag_no("enospc_debug",		Opt_enospc_debug),
+
+#ifdef CONFIG_BTRFS_DEBUG
+	fsparam_enum("fragment",		Opt_fragment_data),
+	// {Opt_fragment_data, "fragment=data"},
+	// {Opt_fragment_metadata, "fragment=metadata"},
+	// {Opt_fragment_all, "fragment=all"},
+#endif
+#ifdef CONFIG_BTRFS_FS_REF_VERIFY
+	fsparam_flag("ref_verify",		Opt_ref_verify),
+#endif
+
+	{}
 };
 
 static bool check_ro_option(struct btrfs_fs_info *fs_info, unsigned long opt,
@@ -899,67 +1000,6 @@ out:
 	return error;
 }
 
-/*
- * Parse mount options that are related to subvolume id
- *
- * The value is later passed to mount_subvol()
- */
-static int btrfs_parse_subvol_options(const char *options, char **subvol_name,
-		u64 *subvol_objectid)
-{
-	substring_t args[MAX_OPT_ARGS];
-	char *opts, *orig, *p;
-	int error = 0;
-	u64 subvolid;
-
-	if (!options)
-		return 0;
-
-	/*
-	 * strsep changes the string, duplicate it because
-	 * btrfs_parse_device_options gets called later
-	 */
-	opts = kstrdup(options, GFP_KERNEL);
-	if (!opts)
-		return -ENOMEM;
-	orig = opts;
-
-	while ((p = strsep(&opts, ",")) != NULL) {
-		int token;
-		if (!*p)
-			continue;
-
-		token = match_token(p, tokens, args);
-		switch (token) {
-		case Opt_subvol:
-			kfree(*subvol_name);
-			*subvol_name = match_strdup(&args[0]);
-			if (!*subvol_name) {
-				error = -ENOMEM;
-				goto out;
-			}
-			break;
-		case Opt_subvolid:
-			error = match_u64(&args[0], &subvolid);
-			if (error)
-				goto out;
-
-			/* we want the original fs_tree */
-			if (subvolid == 0)
-				subvolid = BTRFS_FS_TREE_OBJECTID;
-
-			*subvol_objectid = subvolid;
-			break;
-		default:
-			break;
-		}
-	}
-
-out:
-	kfree(orig);
-	return error;
-}
-
 char *btrfs_get_subvol_name_from_objectid(struct btrfs_fs_info *fs_info,
 					  u64 subvol_objectid)
 {
@@ -1336,20 +1376,17 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
 	return 0;
 }
 
-static int btrfs_test_super(struct super_block *s, void *data)
+static int btrfs_test_super(struct super_block *s, struct fs_context *fc)
 {
-	struct btrfs_fs_info *p = data;
+	struct btrfs_fs_info *p = fc->s_fs_info;
 	struct btrfs_fs_info *fs_info = btrfs_sb(s);
 
 	return fs_info->fs_devices == p->fs_devices;
 }
 
-static int btrfs_set_super(struct super_block *s, void *data)
+static int btrfs_set_super(struct super_block *s, struct fs_context *fc)
 {
-	int err = set_anon_super(s, data);
-	if (!err)
-		s->s_fs_info = data;
-	return err;
+	return set_anon_super_fc(s, fc->s_fs_info);
 }
 
 /*
@@ -1424,198 +1461,6 @@ static struct dentry *mount_subvol(const char *subvol_name, u64 subvol_objectid,
 out:
 	mntput(mnt);
 	kfree(subvol_name);
-	return root;
-}
-
-/*
- * Find a superblock for the given device / mount point.
- *
- * Note: This is based on mount_bdev from fs/super.c with a few additions
- *       for multiple device setup.  Make sure to keep it in sync.
- */
-static struct dentry *btrfs_mount_root(struct file_system_type *fs_type,
-		int flags, const char *device_name, void *data)
-{
-	struct block_device *bdev = NULL;
-	struct super_block *s;
-	struct btrfs_device *device = NULL;
-	struct btrfs_fs_devices *fs_devices = NULL;
-	struct btrfs_fs_info *fs_info = NULL;
-	void *new_sec_opts = NULL;
-	fmode_t mode = FMODE_READ;
-	int error = 0;
-
-	if (!(flags & SB_RDONLY))
-		mode |= FMODE_WRITE;
-
-	if (data) {
-		error = security_sb_eat_lsm_opts(data, &new_sec_opts);
-		if (error)
-			return ERR_PTR(error);
-	}
-
-	/*
-	 * Setup a dummy root and fs_info for test/set super.  This is because
-	 * we don't actually fill this stuff out until open_ctree, but we need
-	 * then open_ctree will properly initialize the file system specific
-	 * settings later.  btrfs_init_fs_info initializes the static elements
-	 * of the fs_info (locks and such) to make cleanup easier if we find a
-	 * superblock with our given fs_devices later on at sget() time.
-	 */
-	fs_info = kvzalloc(sizeof(struct btrfs_fs_info), GFP_KERNEL);
-	if (!fs_info) {
-		error = -ENOMEM;
-		goto error_sec_opts;
-	}
-	btrfs_init_fs_info(fs_info);
-
-	fs_info->super_copy = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);
-	fs_info->super_for_commit = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);
-	if (!fs_info->super_copy || !fs_info->super_for_commit) {
-		error = -ENOMEM;
-		goto error_fs_info;
-	}
-
-	mutex_lock(&uuid_mutex);
-	error = btrfs_parse_device_options(data, mode, fs_type);
-	if (error) {
-		mutex_unlock(&uuid_mutex);
-		goto error_fs_info;
-	}
-
-	device = btrfs_scan_one_device(device_name, mode, fs_type);
-	if (IS_ERR(device)) {
-		mutex_unlock(&uuid_mutex);
-		error = PTR_ERR(device);
-		goto error_fs_info;
-	}
-
-	fs_devices = device->fs_devices;
-	fs_info->fs_devices = fs_devices;
-
-	error = btrfs_open_devices(fs_devices, mode, fs_type);
-	mutex_unlock(&uuid_mutex);
-	if (error)
-		goto error_fs_info;
-
-	if (!(flags & SB_RDONLY) && fs_devices->rw_devices == 0) {
-		error = -EACCES;
-		goto error_close_devices;
-	}
-
-	bdev = fs_devices->latest_dev->bdev;
-	s = sget(fs_type, btrfs_test_super, btrfs_set_super, flags | SB_NOSEC,
-		 fs_info);
-	if (IS_ERR(s)) {
-		error = PTR_ERR(s);
-		goto error_close_devices;
-	}
-
-	if (s->s_root) {
-		btrfs_close_devices(fs_devices);
-		btrfs_free_fs_info(fs_info);
-		if ((flags ^ s->s_flags) & SB_RDONLY)
-			error = -EBUSY;
-	} else {
-		snprintf(s->s_id, sizeof(s->s_id), "%pg", bdev);
-		shrinker_debugfs_rename(&s->s_shrink, "sb-%s:%s", fs_type->name,
-					s->s_id);
-		btrfs_sb(s)->bdev_holder = fs_type;
-		error = btrfs_fill_super(s, fs_devices, data);
-	}
-	if (!error)
-		error = security_sb_set_mnt_opts(s, new_sec_opts, 0, NULL);
-	security_free_mnt_opts(&new_sec_opts);
-	if (error) {
-		deactivate_locked_super(s);
-		return ERR_PTR(error);
-	}
-
-	return dget(s->s_root);
-
-error_close_devices:
-	btrfs_close_devices(fs_devices);
-error_fs_info:
-	btrfs_free_fs_info(fs_info);
-error_sec_opts:
-	security_free_mnt_opts(&new_sec_opts);
-	return ERR_PTR(error);
-}
-
-/*
- * Mount function which is called by VFS layer.
- *
- * In order to allow mounting a subvolume directly, btrfs uses mount_subtree()
- * which needs vfsmount* of device's root (/).  This means device's root has to
- * be mounted internally in any case.
- *
- * Operation flow:
- *   1. Parse subvol id related options for later use in mount_subvol().
- *
- *   2. Mount device's root (/) by calling vfs_kern_mount().
- *
- *      NOTE: vfs_kern_mount() is used by VFS to call btrfs_mount() in the
- *      first place. In order to avoid calling btrfs_mount() again, we use
- *      different file_system_type which is not registered to VFS by
- *      register_filesystem() (btrfs_root_fs_type). As a result,
- *      btrfs_mount_root() is called. The return value will be used by
- *      mount_subtree() in mount_subvol().
- *
- *   3. Call mount_subvol() to get the dentry of subvolume. Since there is
- *      "btrfs subvolume set-default", mount_subvol() is called always.
- */
-static struct dentry *btrfs_mount(struct file_system_type *fs_type, int flags,
-		const char *device_name, void *data)
-{
-	struct vfsmount *mnt_root;
-	struct dentry *root;
-	char *subvol_name = NULL;
-	u64 subvol_objectid = 0;
-	int error = 0;
-
-	error = btrfs_parse_subvol_options(data, &subvol_name,
-					&subvol_objectid);
-	if (error) {
-		kfree(subvol_name);
-		return ERR_PTR(error);
-	}
-
-	/* mount device's root (/) */
-	mnt_root = vfs_kern_mount(&btrfs_root_fs_type, flags, device_name, data);
-	if (PTR_ERR_OR_ZERO(mnt_root) == -EBUSY) {
-		if (flags & SB_RDONLY) {
-			mnt_root = vfs_kern_mount(&btrfs_root_fs_type,
-				flags & ~SB_RDONLY, device_name, data);
-		} else {
-			mnt_root = vfs_kern_mount(&btrfs_root_fs_type,
-				flags | SB_RDONLY, device_name, data);
-			if (IS_ERR(mnt_root)) {
-				root = ERR_CAST(mnt_root);
-				kfree(subvol_name);
-				goto out;
-			}
-
-			down_write(&mnt_root->mnt_sb->s_umount);
-			error = btrfs_remount(mnt_root->mnt_sb, &flags, NULL);
-			up_write(&mnt_root->mnt_sb->s_umount);
-			if (error < 0) {
-				root = ERR_PTR(error);
-				mntput(mnt_root);
-				kfree(subvol_name);
-				goto out;
-			}
-		}
-	}
-	if (IS_ERR(mnt_root)) {
-		root = ERR_CAST(mnt_root);
-		kfree(subvol_name);
-		goto out;
-	}
-
-	/* mount_subvol() will free subvol_name and mnt_root */
-	root = mount_subvol(subvol_name, subvol_objectid, mnt_root);
-
-out:
 	return root;
 }
 
@@ -2139,20 +1984,317 @@ static void btrfs_kill_super(struct super_block *sb)
 	btrfs_free_fs_info(fs_info);
 }
 
-static struct file_system_type btrfs_fs_type = {
-	.owner		= THIS_MODULE,
-	.name		= "btrfs",
-	.mount		= btrfs_mount,
-	.kill_sb	= btrfs_kill_super,
-	.fs_flags	= FS_REQUIRES_DEV | FS_BINARY_MOUNTDATA,
+static int btrfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
+{
+	struct btrfs_fs_context *ctx = fc->fs_private;
+	struct fs_parse_result result;
+	char *dup = NULL;
+	int error = 0;
+	int opt;
+
+	opt = fs_parse(fc, btrfs_parameter_spec, param, &result);
+	if (opt < 0)
+		return opt;
+
+	switch (opt) {
+	case Opt_rescue:
+		break;
+	case Opt_subvol:
+		if (*param->string) {
+			dup = kstrdup(param->string, GFP_KERNEL);
+			if (!dup)
+				return -ENOMEM;
+		}
+
+		/* empty subvol= resets */
+		kfree(ctx->subvol_name);
+		ctx->subvol_name = dup;
+		break;
+	case Opt_subvolid:
+		if (result.uint_64 == 0)
+			ctx->subvol_id = BTRFS_FS_TREE_OBJECTID;
+		else
+			ctx->subvol_id = result.uint_64;
+		break;
+	default:
+		pr_err("unknown mount option [%s].", param->key);
+		error = -EINVAL;
+	}
+
+	return error;
+}
+
+// struct vfsmount *vfs_kern_mount(struct file_system_type *type,
+// 				int flags, const char *name,
+// 				void *data)
+// {
+// 	struct fs_context *fc;
+// 	struct vfsmount *mnt;
+// 	int ret = 0;
+// 
+// 	if (!type)
+// 		return ERR_PTR(-EINVAL);
+// 
+// 	fc = fs_context_for_mount(type, flags);
+// 	if (IS_ERR(fc))
+// 		return ERR_CAST(fc);
+// 
+// 	if (name)
+// 		ret = vfs_parse_fs_string(fc, "source",
+// 					  name, strlen(name));
+// 	if (!ret)
+// 		ret = parse_monolithic_mount_data(fc, data);
+// 	if (!ret)
+// 		mnt = fc_mount(fc);
+// 	else
+// 		mnt = ERR_PTR(ret);
+// 
+// 	put_fs_context(fc);
+// 	return mnt;
+// }
+//
+// struct vfsmount *fc_mount(struct fs_context *fc)
+// {
+// 	int err = vfs_get_tree(fc);
+// 	if (!err) {
+// 		up_write(&fc->root->d_sb->s_umount);
+// 		return vfs_create_mount(fc);
+// 	}
+// 	return ERR_PTR(err);
+// }
+
+static int btrfs_get_tree_root(struct fs_context *fc)
+{
+	// struct btrfs_fs_context *ctx = fc->fs_private;
+	struct btrfs_fs_info *fs_info = fc->s_fs_info;
+	struct block_device *bdev = NULL;
+	struct super_block *s;
+	struct btrfs_device *device = NULL;
+	struct btrfs_fs_devices *fs_devices = NULL;
+	void *new_sec_opts = NULL;
+	fmode_t mode = FMODE_READ;
+	int error = 0;
+	void *data = NULL; // TODO: remove
+
+	if (!(fc->sb_flags & SB_RDONLY))
+		mode |= FMODE_WRITE;
+
+	if (data) {
+		error = security_sb_eat_lsm_opts(data, &new_sec_opts);
+		if (error)
+			return error;
+	}
+
+	fs_info->super_copy = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);
+	fs_info->super_for_commit = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);
+	if (!fs_info->super_copy || !fs_info->super_for_commit) {
+		error = -ENOMEM;
+		goto error_lsm_opts;
+	}
+
+	mutex_lock(&uuid_mutex);
+	error = btrfs_parse_device_options(data, mode, &btrfs_fs_type);
+	if (error) {
+		mutex_unlock(&uuid_mutex);
+		goto error_lsm_opts;
+	}
+
+	pr_err("btrfs_get_tree_root: fc->source(%s)\n", fc->source);
+	device = btrfs_scan_one_device(fc->source, mode, &btrfs_fs_type);
+	if (IS_ERR(device)) {
+		mutex_unlock(&uuid_mutex);
+		error = PTR_ERR(device);
+		goto error_lsm_opts;
+	}
+
+	fs_devices = device->fs_devices;
+	fs_info->fs_devices = fs_devices;
+
+	error = btrfs_open_devices(fs_devices, mode, &btrfs_fs_type);
+	mutex_unlock(&uuid_mutex);
+	if (error)
+		goto error_lsm_opts;
+
+	if (!(fc->sb_flags & SB_RDONLY) && fs_devices->rw_devices == 0) {
+		error = -EACCES;
+		goto error_close_devices;
+	}
+
+	bdev = fs_devices->latest_dev->bdev;
+
+	fc->sb_flags |= SB_NOSEC;
+	/*
+	 * If no matching super block is found a new super block is
+	 * allocated and fc->s_fs_info will have been transfered to
+	 * sb->s_fs_info. If a matching super block is found
+	 * fc->s_fs_info will be left alone and cleaned up during
+	 * btrfs_free() when we destroy the fs_context. IOW, no freeing
+	 * of fc->s_fs_info has to be done here. Also, there's no
+	 * explicit assignment of fc->s_fs_info to sb->s_fs_info in
+	 * btrfs_set_super() as that's done by sget_fc().
+	 */
+	s = sget_fc(fc, btrfs_test_super, btrfs_set_super);
+	if (IS_ERR(s)) {
+		error = PTR_ERR(s);
+		goto error_close_devices;
+	}
+
+	if (s->s_root) {
+		btrfs_close_devices(fs_devices);
+		if ((fc->sb_flags ^ s->s_flags) & SB_RDONLY)
+			error = -EBUSY;
+	} else {
+		snprintf(s->s_id, sizeof(s->s_id), "%pg", bdev);
+		shrinker_debugfs_rename(&s->s_shrink, "sb-%s:%s", btrfs_fs_type.name,
+					s->s_id);
+		btrfs_sb(s)->bdev_holder = &btrfs_fs_type;
+		error = btrfs_fill_super(s, fs_devices, data);
+	}
+	if (!error)
+		error = security_sb_set_mnt_opts(s, new_sec_opts, 0, NULL);
+	security_free_mnt_opts(&new_sec_opts);
+	if (error) {
+		deactivate_locked_super(s);
+		return error;
+	}
+
+	fc->root = dget(s->s_root);
+	return 0;
+
+error_close_devices:
+	btrfs_close_devices(fs_devices);
+error_lsm_opts:
+	security_free_mnt_opts(&new_sec_opts);
+	return error;
+}
+
+/*
+ * fsconfig(FSCONFIG_CMD_CREATE)
+ * -> vfs_get_tree(fc)
+ *    -> btrfs_get_tree(fc)
+ *       -> fc_mount(fc)
+ *          -> vfs_get_tree(fc)
+ *             -> btrfs_get_tree_root(fc)
+ *       -> mount_subvol()
+ */
+static int btrfs_get_tree(struct fs_context *fc)
+{
+	struct btrfs_fs_info *fs_info = fc->s_fs_info;
+	struct btrfs_fs_context *ctx = fc->fs_private;
+	struct vfsmount *mnt_root;
+	struct dentry *root;
+	unsigned int sb_flags = fc->sb_flags;
+	int error;
+
+	/*
+	 * The old style of mounting btrfs created a whole new
+	 * filesystem type that wasn't registered with the kernel and
+	 * was only used to create the superblock. Let's avoid all that
+	 * by reusing the fs_context.
+	 */
+
+	if (ctx->prepare_sb) {
+		pr_err("btrfs_get_tree: Second call into btrfs_get_tree() again to prepare superblock\n");
+		return btrfs_get_tree_root(fc); // TODO: pass mount options
+	}
+
+	pr_err("btrfs_get_tree: First call into btrfs_get_tree()\n");
+	ctx->prepare_sb = true;
+	mnt_root = fc_mount(fc);
+	if (PTR_ERR_OR_ZERO(mnt_root) == -EBUSY) {
+		if (fc->sb_flags & SB_RDONLY)
+			fc->sb_flags &= ~SB_RDONLY;
+		else
+			fc->sb_flags |= SB_RDONLY;
+		mnt_root = fc_mount(fc);
+		fc->sb_flags = sb_flags;
+	}
+	if (IS_ERR(mnt_root)) {
+		error = PTR_ERR(mnt_root);
+		goto out;
+	}
+
+	// mount subvolume
+	root = mount_subvol(ctx->subvol_name, ctx->subvol_id, mnt_root);
+	if (IS_ERR(root)) {
+		error = PTR_ERR(root);
+		goto out;
+	}
+
+	pr_err("btrfs_get_tree: fc->root(%pd) -> root(%pd)\n", fc->root, root);
+	/* drop fc->root setup in btrfs_get_tree_root() */
+	dput(fc->root);
+	fc->root = root;
+	return 0;
+
+out:
+	btrfs_free_fs_info(fs_info);
+	return error;
+}
+
+static int btrfs_reconfigure(struct fs_context *fc)
+{
+	return -EOPNOTSUPP;
+}
+
+static void btrfs_free(struct fs_context *fc)
+{
+	struct btrfs_fs_context *ctx = fc->fs_private;
+	struct btrfs_fs_info *fs_info = fc->s_fs_info;
+
+	if (ctx) {
+		kfree(ctx->subvol_name);
+		kfree(ctx);
+	}
+
+	if (fs_info)
+		btrfs_free_fs_info(fs_info);
+}
+
+static const struct fs_context_operations btrfs_context_ops = {
+	.parse_param = btrfs_parse_param,
+	.get_tree    = btrfs_get_tree,
+	.reconfigure = btrfs_reconfigure,
+	.free        = btrfs_free,
 };
 
-static struct file_system_type btrfs_root_fs_type = {
-	.owner		= THIS_MODULE,
-	.name		= "btrfs",
-	.mount		= btrfs_mount_root,
-	.kill_sb	= btrfs_kill_super,
-	.fs_flags	= FS_REQUIRES_DEV | FS_BINARY_MOUNTDATA | FS_ALLOW_IDMAP,
+static int btrfs_init_fs_context(struct fs_context *fc)
+{
+	struct btrfs_fs_context *ctx;
+	struct btrfs_fs_info *fs_info;
+
+	ctx = kzalloc(sizeof(struct btrfs_fs_context), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	/*
+	 * Setup a dummy root and fs_info for test/set super.  This is because
+	 * we don't actually fill this stuff out until open_ctree, but we need
+	 * then open_ctree will properly initialize the file system specific
+	 * settings later.  btrfs_init_fs_info initializes the static elements
+	 * of the fs_info (locks and such) to make cleanup easier if we find a
+	 * superblock with our given fs_devices later on at sget() time.
+	 */
+	fs_info = kvzalloc(sizeof(struct btrfs_fs_info), GFP_KERNEL);
+	if (!fs_info) {
+		kfree(ctx);
+		return -ENOMEM;
+	}
+	btrfs_init_fs_info(fs_info);
+
+	fc->s_fs_info		= fs_info;
+	fc->fs_private		= ctx;
+	fc->ops			= &btrfs_context_ops;
+	return 0;
+}
+
+static struct file_system_type btrfs_fs_type = {
+	.owner			= THIS_MODULE,
+	.name			= "btrfs",
+	.init_fs_context	= btrfs_init_fs_context,
+	.parameters		= btrfs_parameter_spec,
+	.kill_sb		= btrfs_kill_super,
+	.fs_flags		= FS_REQUIRES_DEV | FS_BINARY_MOUNTDATA | FS_ALLOW_IDMAP,
 };
 
 MODULE_ALIAS_FS("btrfs");
