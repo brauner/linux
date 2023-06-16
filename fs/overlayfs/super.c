@@ -1949,6 +1949,8 @@ static int ovl_fill_super(struct super_block *sb, struct fs_context *fc)
 out_free_oe:
 	ovl_free_entry(oe);
 out_err:
+	ovl_free_fs(ofs);
+	sb->s_fs_info = NULL;
 	return err;
 }
 
