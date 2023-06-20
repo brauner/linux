@@ -1520,6 +1520,68 @@ int vfs_get_tree(struct fs_context *fc)
 		BUG();
 	}
 
+	if (fc->subdir) {
+		struct vfsmount *mnt;
+		struct dentry *dentry;
+		struct super_block *sb = fc->root->d_sb;
+
+		up_write(&sb->s_umount);
+
+		/* create mount of superblock */
+		mnt = vfs_create_mount(fc);
+		if (IS_ERR(mnt)) {
+			dput(fc->root);
+			fc->root = NULL;
+			/*
+			 * TODO: double-check that this needs to be
+			 * deactivate_super() and not
+			 * deactivate_locked_super(). Btw, there might also be
+			 * a bug in btrfs in mount_subvol() where they call
+			 * deactivate_locked_super().
+			 */
+			deactivate_super(sb);
+			return PTR_ERR(mnt);
+		}
+
+		/* @mnt will be consumed by mount_subtree() */
+		dentry = mount_subtree(mnt, fc->subdir);
+		if (IS_ERR(dentry)) {
+			dput(fc->root);
+			fc->root = NULL;
+			/*
+			 * TODO: double-check that this needs to be
+			 * deactivate_super() and not
+			 * deactivate_locked_super(). Btw, there might also be
+			 * a bug in btrfs in mount_subvol() where they call
+			 * deactivate_locked_super().
+			 */
+			deactivate_super(sb);
+			return PTR_ERR(mnt);
+		}
+		dput(fc->root);
+		/*
+		 * Make sure that we need to take another reference on @dentry
+		 * here or whether we need to just take the reference from
+		 * mount_subtre().
+		 */
+		fc->root = dget(dentry);
+		if (fc->ops->check_subtree)
+			error = fc->ops->check_subtree(fc);
+		if (error) {
+			dput(fc->root);
+			fc->root = NULL;
+			/*
+			 * TODO: double-check that this needs to be
+			 * deactivate_super() and not
+			 * deactivate_locked_super(). Btw, there might also be
+			 * a bug in btrfs in mount_subvol() where they call
+			 * deactivate_locked_super().
+			 */
+			deactivate_super(sb);
+			return error;
+		}
+	}
+
 	sb = fc->root->d_sb;
 	WARN_ON(!sb->s_bdi);
 
