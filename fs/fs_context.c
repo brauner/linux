@@ -20,6 +20,8 @@
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
 #include <net/net_namespace.h>
+#include <linux/proc_fs.h>
+#include <linux/proc_ns.h>
 #include <asm/sections.h>
 #include "mount.h"
 #include "internal.h"
@@ -54,6 +56,75 @@ static const struct constant_table common_clear_sb_flag[] = {
 	{ "rw",		SB_RDONLY },
 	{ },
 };
+
+enum {
+	Opt_delegate,
+};
+
+const struct fs_parameter_spec vfs_parameter_spec[] = {
+	fsparam_fd   ("delegate",	Opt_delegate),
+	{}
+};
+
+static int vfs_parse_generic_param(struct fs_context *fc,
+				   struct fs_parameter *param)
+{
+	int opt;
+	struct fs_parse_result result;
+	struct ns_common *ns;
+	struct user_namespace *user_ns;
+
+	opt = fs_parse(fc, vfs_parameter_spec, param, &result);
+	if (opt < 0)
+		return opt;
+
+	switch (opt) {
+	case Opt_delegate:
+		/*
+		 * Delegating a superblock doesn't really make sense
+		 * outside of creating the first mount.
+		 */
+		if (fc->purpose != FS_CONTEXT_FOR_MOUNT)
+			return -EINVAL;
+
+		/*
+		 * A filesystem that's capable of idmapped mounts is also
+		 * capable of having its superblock delegated.
+		 */
+		if (!(fc->fs_type->fs_flags & FS_ALLOW_IDMAP))
+			return invalf(fc,
+				"%s filesystems don't support being delegated to a user namespace",
+				fc->fs_type->name);
+
+		if (!proc_ns_file(param->file))
+			return invalfc(fc,
+				"file descriptor must refer to a namespace");
+
+		ns = get_proc_ns(file_inode(param->file));
+		if (ns->ops->type != CLONE_NEWUSER)
+			return invalfc(fc,
+				"file descriptor must refer to a user namespace");
+
+		user_ns = container_of(ns, struct user_namespace, ns);
+
+		if (!ns_capable(user_ns, CAP_SYS_ADMIN)) {
+			errorf(fc,
+			       "insufficient privileges to delegate to user namespace");
+			return -EPERM;
+		}
+
+		if (fc->user_ns != user_ns) {
+			put_user_ns(fc->user_ns);
+			fc->user_ns = get_user_ns(user_ns);
+			infof(fc, "filesystem will be delegated to user namespace [%u]",
+			      ns->inum);
+		}
+		return 0;
+	}
+
+	/* Not a generic VFS parameter. */
+	return -ENOPARAM;
+}
 
 /*
  * Check for a common mount option that manipulates s_flags.
@@ -140,6 +211,10 @@ int vfs_parse_fs_param(struct fs_context *fc, struct fs_parameter *param)
 		/* Param belongs to the LSM or is disallowed by the LSM; so
 		 * don't pass to the FS.
 		 */
+		return ret;
+
+	ret = vfs_parse_generic_param(fc, param);
+	if (ret != -ENOPARAM)
 		return ret;
 
 	if (fc->ops->parse_param) {
