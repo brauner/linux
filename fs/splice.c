@@ -300,6 +300,42 @@ void splice_shrink_spd(struct splice_pipe_desc *spd)
 	kfree(spd->partial);
 }
 
+static void finalize_pipe_buf(struct pipe_buffer *buf, unsigned int chunk)
+{
+	buf->len = chunk;
+	buf->ops = &default_pipe_buf_ops;
+	unlock_page(buf->page);
+}
+
+static int busy_pipe_buf_confirm(struct pipe_inode_info *pipe,
+				 struct pipe_buffer *buf)
+{
+	struct page *page = buf->page;
+
+	if (folio_wait_bit_interruptible(page_folio(page), PG_locked))
+		return -EINTR;
+	return 0;
+}
+
+/*
+ * These are the same as the default pipe buf operations,
+ * but the '.confirm()' function requires that any user
+ * wait for the page to unlock before use.
+ *
+ * I guess we could use the whole PG_uptodate logic too,
+ * and treat these as some kind of special page table pages.
+ *
+ * PIPE_BUF_FLAG_CAN_MERGE must obviously not be set when
+ * using these, and it's important that any pipe reader
+ * look at buf->len only _after_ confirming the buffer!
+ */
+const struct pipe_buf_operations busy_pipe_buf_ops = {
+	.confirm	= busy_pipe_buf_confirm,
+	.release	= generic_pipe_buf_release,
+	.try_steal	= generic_pipe_buf_try_steal,
+	.get		= generic_pipe_buf_get,
+};
+
 /**
  * copy_splice_read -  Copy data from a file and splice the copy into a pipe
  * @in: The file to read from
@@ -328,6 +364,7 @@ ssize_t copy_splice_read(struct file *in, loff_t *ppos,
 	struct bio_vec *bv;
 	struct kiocb kiocb;
 	struct page **pages;
+	struct pipe_buffer **bufs;
 	ssize_t ret;
 	size_t used, npages, chunk, remain, keep = 0;
 	int i;
@@ -339,11 +376,13 @@ ssize_t copy_splice_read(struct file *in, loff_t *ppos,
 	npages = DIV_ROUND_UP(len, PAGE_SIZE);
 
 	bv = kzalloc(array_size(npages, sizeof(bv[0])) +
-		     array_size(npages, sizeof(struct page *)), GFP_KERNEL);
+		     array_size(npages, sizeof(struct page *)) +
+		     array_size(npages, sizeof(struct pipe_buffer *)), GFP_KERNEL);
 	if (!bv)
 		return -ENOMEM;
 
 	pages = (struct page **)(bv + npages);
+	bufs = (struct pipe_buffer **)(pages + npages);
 	npages = alloc_pages_bulk_array(GFP_USER, npages, pages);
 	if (!npages) {
 		kfree(bv);
@@ -352,13 +391,33 @@ ssize_t copy_splice_read(struct file *in, loff_t *ppos,
 
 	remain = len = min_t(size_t, len, npages * PAGE_SIZE);
 
+	/* Push them into the pipe and build up the bio_vec */
 	for (i = 0; i < npages; i++) {
+		struct pipe_buffer *buf = pipe_head_buf(pipe);
+		struct page *page = pages[i];
+
+		pipe->head++;
+		lock_page(page);
+		*buf = (struct pipe_buffer) {
+			.ops	= &busy_pipe_buf_ops,
+			.page	= page,
+			.offset	= 0,
+			.len	= chunk,
+		};
+		bufs[i] = buf;
+
 		chunk = min_t(size_t, PAGE_SIZE, remain);
-		bv[i].bv_page = pages[i];
+		bv[i].bv_page = page;
 		bv[i].bv_offset = 0;
 		bv[i].bv_len = chunk;
 		remain -= chunk;
 	}
+
+	/*
+	 * We have now reserved the space with locked pages,
+	 * and can unlock the pipe during the IO.
+	 */
+	pipe_unlock(pipe);
 
 	/* Do the I/O */
 	iov_iter_bvec(&to, ITER_DEST, bv, npages, len);
@@ -378,26 +437,22 @@ ssize_t copy_splice_read(struct file *in, loff_t *ppos,
 	if (ret == -EFAULT)
 		ret = -EAGAIN;
 
-	/* Free any pages that didn't get touched at all. */
-	if (keep < npages)
-		release_pages(pages + keep, npages - keep);
-
-	/* Push the remaining pages into the pipe. */
+	/* Update the page state in the pipe */
 	remain = ret;
-	for (i = 0; i < keep; i++) {
-		struct pipe_buffer *buf = pipe_head_buf(pipe);
+	for (i = 0; i < npages; i++) {
+		struct pipe_buffer *buf = bufs[i];
 
 		chunk = min_t(size_t, remain, PAGE_SIZE);
-		*buf = (struct pipe_buffer) {
-			.ops	= &default_pipe_buf_ops,
-			.page	= bv[i].bv_page,
-			.offset	= 0,
-			.len	= chunk,
-		};
-		pipe->head++;
 		remain -= chunk;
+
+		/*
+		 * NOTE! The size might have changed, and
+		 * chunk may be smaller or zero!
+		 */
+		finalize_pipe_buf(buf, chunk);
 	}
 
+	pipe_lock(pipe);
 	kfree(bv);
 	return ret;
 }
@@ -455,16 +510,16 @@ static int splice_from_pipe_feed(struct pipe_inode_info *pipe, struct splice_des
 	while (!pipe_empty(head, tail)) {
 		struct pipe_buffer *buf = &pipe->bufs[tail & mask];
 
-		sd->len = buf->len;
-		if (sd->len > sd->total_len)
-			sd->len = sd->total_len;
-
 		ret = pipe_buf_confirm(pipe, buf);
 		if (unlikely(ret)) {
 			if (ret == -ENODATA)
 				ret = 0;
 			return ret;
 		}
+
+		sd->len = buf->len;
+		if (sd->len > sd->total_len)
+			sd->len = sd->total_len;
 
 		ret = actor(pipe, buf, sd);
 		if (ret <= 0)
@@ -715,12 +770,7 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 		left = sd.total_len;
 		for (n = 0; !pipe_empty(head, tail) && left && n < nbufs; tail++) {
 			struct pipe_buffer *buf = &pipe->bufs[tail & mask];
-			size_t this_len = buf->len;
-
-			/* zero-length bvecs are not supported, skip them */
-			if (!this_len)
-				continue;
-			this_len = min(this_len, left);
+			size_t this_len;
 
 			ret = pipe_buf_confirm(pipe, buf);
 			if (unlikely(ret)) {
@@ -728,6 +778,12 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 					ret = 0;
 				goto done;
 			}
+
+			/* zero-length bvecs are not supported, skip them */
+			this_len = buf->len;
+			if (!this_len)
+				continue;
+			this_len = min(this_len, left);
 
 			bvec_set_page(&array[n], buf->page, this_len,
 				      buf->offset);
@@ -847,19 +903,19 @@ ssize_t splice_to_socket(struct pipe_inode_info *pipe, struct file *out,
 			struct pipe_buffer *buf = &pipe->bufs[tail & mask];
 			size_t seg;
 
-			if (!buf->len) {
-				tail++;
-				continue;
-			}
-
-			seg = min_t(size_t, remain, buf->len);
-
 			ret = pipe_buf_confirm(pipe, buf);
 			if (unlikely(ret)) {
 				if (ret == -ENODATA)
 					ret = 0;
 				break;
 			}
+
+			if (!buf->len) {
+				tail++;
+				continue;
+			}
+
+			seg = min_t(size_t, remain, buf->len);
 
 			bvec_set_page(&bvec[bc++], buf->page, seg, buf->offset);
 			remain -= seg;

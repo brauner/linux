@@ -1018,6 +1018,7 @@ static inline bool folio_lock_or_retry(struct folio *folio,
  */
 void folio_wait_bit(struct folio *folio, int bit_nr);
 int folio_wait_bit_killable(struct folio *folio, int bit_nr);
+int folio_wait_bit_interruptible(struct folio *folio, int bit_nr);
 
 /* 
  * Wait for a folio to be unlocked.

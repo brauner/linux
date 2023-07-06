@@ -1450,6 +1450,12 @@ int folio_wait_bit_killable(struct folio *folio, int bit_nr)
 }
 EXPORT_SYMBOL(folio_wait_bit_killable);
 
+int folio_wait_bit_interruptible(struct folio *folio, int bit_nr)
+{
+	return folio_wait_bit_common(folio, bit_nr, TASK_INTERRUPTIBLE, SHARED);
+}
+EXPORT_SYMBOL(folio_wait_bit_interruptible);
+
 /**
  * folio_put_wait_locked - Drop a reference and wait for it to be unlocked
  * @folio: The folio to wait for.
