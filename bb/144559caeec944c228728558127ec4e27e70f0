@@ -1,0 +1,20 @@
+The following fixup was folded into this patch.
+===============================================
+
+Subject: Re: [PATCH v2 00/89] fs: new accessors for inode->i_ctime
+X-Date: Fri, 07 Jul 2023 14:42:31 +0200
+X-URI: https://lore.kernel.org/lkml/5e40891f6423feb5b68f025e31f26e9a50ae9390.camel@kernel.org
+
+diff --git a/fs/overlayfs/file.c b/fs/overlayfs/file.c
+index 7acd3e3fe790..7e7876aae01c 100644
+--- a/fs/overlayfs/file.c
++++ b/fs/overlayfs/file.c
+@@ -255,7 +255,7 @@ static void ovl_file_accessed(struct file *file)
+ 	if ((!timespec64_equal(&inode->i_mtime, &upperinode->i_mtime) ||
+ 	     !timespec64_equal(&ctime, &uctime))) {
+ 		inode->i_mtime = upperinode->i_mtime;
+-		inode_set_ctime_to_ts(inode, inode_get_ctime(upperinode));
++		inode_set_ctime_to_ts(inode, uctime);
+ 	}
+
+ 	touch_atime(&file->f_path);
