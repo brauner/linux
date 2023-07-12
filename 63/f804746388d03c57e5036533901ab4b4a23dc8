@@ -1,0 +1,27 @@
+The following fixup was folded into this patch.
+===============================================
+
+Subject: Re: [PATCH v2 00/89] fs: new accessors for inode->i_ctime
+X-Date: Fri, 07 Jul 2023 14:42:31 +0200
+X-URI: https://lore.kernel.org/lkml/5e40891f6423feb5b68f025e31f26e9a50ae9390.camel@kernel.org
+
+diff --git a/fs/isofs/inode.c b/fs/isofs/inode.c
+index 98a78200cff1..2ee21286ac8f 100644
+--- a/fs/isofs/inode.c
++++ b/fs/isofs/inode.c
+@@ -1422,13 +1422,8 @@ static int isofs_read_inode(struct inode *inode, int relocated)
+ 			inode->i_ino, de->flags[-high_sierra]);
+ 	}
+ #endif
+-
+-	inode->i_mtime.tv_sec =
+-	inode->i_atime.tv_sec = inode_set_ctime(inode,
+-						iso_date(de->date, high_sierra),
+-						0).tv_sec;
+-	inode->i_mtime.tv_nsec =
+-	inode->i_atime.tv_nsec = 0;
++	inode->i_mtime = inode->i_atime =
++		inode_set_ctime(inode, iso_date(de->date, high_sierra), 0);
+
+ 	ei->i_first_extent = (isonum_733(de->extent) +
+ 			isonum_711(de->ext_attr_length));
