@@ -188,3 +188,38 @@ index bbc57954dfd3..c6a837b90af4 100644
  		EXT4_INODE_SET_XTIME(i_mtime, inode, raw_inode);
  		EXT4_INODE_SET_XTIME(i_atime, inode, raw_inode);
  		ext4_inode_csum_set(inode, raw_inode, ei);
+
+The following fixup was folded into this patch.
+===============================================
+
+Subject: [PATCH] ext4: fix decoding of raw_inode timestamps
+X-Date: Wed, 12 Jul 2023 17:02:49 +0200
+X-URI: https://lore.kernel.org/lkml/20230712150251.163790-1-jlayton@kernel.org
+
+When we covert a timestamp from raw disk format, we need to consider it
+to be signed, as the value may represent a date earlier than 1970. This
+fixes generic/258 on ext4.
+
+Cc: Jan Kara <jack@suse.cz>
+Fixes: f2ddb05870fb ("ext4: convert to ctime accessor functions")
+Signed-off-by: Jeff Layton <jlayton@kernel.org>
+---
+ fs/ext4/ext4.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+It might be best to just squash this fix in with the ext4 conversion in
+the vfs tree.
+
+diff --git a/fs/ext4/ext4.h b/fs/ext4/ext4.h
+index d63543187359..2af347669db7 100644
+--- a/fs/ext4/ext4.h
++++ b/fs/ext4/ext4.h
+@@ -877,7 +877,7 @@ static inline __le32 ext4_encode_extra_time(struct timespec64 ts)
+ static inline struct timespec64 ext4_decode_extra_time(__le32 base,
+                                                       __le32 extra)
+ {
+-       struct timespec64 ts = { .tv_sec = le32_to_cpu(base) };
++       struct timespec64 ts = { .tv_sec = (signed)le32_to_cpu(base) };
+
+        if (unlikely(extra & cpu_to_le32(EXT4_EPOCH_MASK)))
+                ts.tv_sec += (u64)(le32_to_cpu(extra) & EXT4_EPOCH_MASK) << 32;
