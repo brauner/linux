@@ -1,0 +1,23 @@
+The following fixup was folded into this patch.
+===============================================
+
+Subject: Re: [PATCH v2 00/89] fs: new accessors for inode->i_ctime
+X-Date: Fri, 07 Jul 2023 14:42:31 +0200
+X-URI: https://lore.kernel.org/lkml/5e40891f6423feb5b68f025e31f26e9a50ae9390.camel@kernel.org
+
+diff --git a/fs/erofs/inode.c b/fs/erofs/inode.c
+index 806374d866d1..567c0d305ea4 100644
+--- a/fs/erofs/inode.c
++++ b/fs/erofs/inode.c
+@@ -175,10 +175,7 @@ static void *erofs_read_inode(struct erofs_buf *buf,
+                vi->chunkbits = sb->s_blocksize_bits +
+                        (vi->chunkformat & EROFS_CHUNK_FORMAT_BLKBITS_MASK);
+        }
+-       inode->i_mtime.tv_sec = inode_get_ctime(inode).tv_sec;
+-       inode->i_atime.tv_sec = inode_get_ctime(inode).tv_sec;
+-       inode->i_mtime.tv_nsec = inode_get_ctime(inode).tv_nsec;
+-       inode->i_atime.tv_nsec = inode_get_ctime(inode).tv_nsec;
++       inode->i_mtime = inode->i_atime = inode_get_ctime(inode);
+
+        inode->i_flags &= ~S_DAX;
+        if (test_opt(&sbi->opt, DAX_ALWAYS) && S_ISREG(inode->i_mode) &&

@@ -1,0 +1,21 @@
+The following fixup was folded into this patch.
+===============================================
+
+Subject: Re: [PATCH v2 00/89] fs: new accessors for inode->i_ctime
+X-Date: Fri, 07 Jul 2023 14:42:31 +0200
+X-URI: https://lore.kernel.org/lkml/5e40891f6423feb5b68f025e31f26e9a50ae9390.camel@kernel.org
+
+diff --git a/fs/ceph/inode.c b/fs/ceph/inode.c
+index bcdb1a0beccf..5f6e93714f5a 100644
+--- a/fs/ceph/inode.c
++++ b/fs/ceph/inode.c
+@@ -699,8 +699,7 @@ void ceph_fill_file_time(struct inode *inode, int issued,
+                if (ci->i_version == 0 ||
+                    timespec64_compare(ctime, &ictime) > 0) {
+                        dout("ctime %lld.%09ld -> %lld.%09ld inc w/ cap\n",
+-                            inode_get_ctime(inode).tv_sec,
+-                            inode_get_ctime(inode).tv_nsec,
++                            ictime.tv_sec, ictime.tv_nsec,
+                             ctime->tv_sec, ctime->tv_nsec);
+                        inode_set_ctime_to_ts(inode, *ctime);
+                }
