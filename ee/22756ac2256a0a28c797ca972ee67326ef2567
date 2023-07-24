@@ -1,0 +1,18 @@
+The following fixup was folded into this patch.
+===============================================
+
+Subject: Re: [PATCH v2 00/89] fs: new accessors for inode->i_ctime
+X-Date: Fri, 07 Jul 2023 14:42:31 +0200
+X-URI: https://lore.kernel.org/lkml/5e40891f6423feb5b68f025e31f26e9a50ae9390.camel@kernel.org
+
+diff --git a/fs/smb/client/fscache.h b/fs/smb/client/fscache.h
+index a228964bc2ce..84f3b09367d2 100644
+--- a/fs/smb/client/fscache.h
++++ b/fs/smb/client/fscache.h
+@@ -56,7 +56,7 @@ void cifs_fscache_fill_coherency(struct inode *inode,
+ 	cd->last_write_time_sec   = cpu_to_le64(cifsi->netfs.inode.i_mtime.tv_sec);
+ 	cd->last_write_time_nsec  = cpu_to_le32(cifsi->netfs.inode.i_mtime.tv_nsec);
+ 	cd->last_change_time_sec  = cpu_to_le64(ctime.tv_sec);
+-	cd->last_change_time_nsec  = cpu_to_le64(ctime.tv_nsec);
++	cd->last_change_time_nsec = cpu_to_le32(ctime.tv_nsec);
+ }

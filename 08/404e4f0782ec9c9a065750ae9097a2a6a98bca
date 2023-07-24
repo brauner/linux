@@ -1,0 +1,21 @@
+The following fixup was folded into this patch.
+===============================================
+
+Subject: Re: [PATCH v2 00/89] fs: new accessors for inode->i_ctime
+X-Date: Fri, 07 Jul 2023 14:42:31 +0200
+X-URI: https://lore.kernel.org/lkml/5e40891f6423feb5b68f025e31f26e9a50ae9390.camel@kernel.org
+
+diff --git a/fs/romfs/super.c b/fs/romfs/super.c
+index 961b9d342e0e..d89739655f9e 100644
+--- a/fs/romfs/super.c
++++ b/fs/romfs/super.c
+@@ -322,8 +322,7 @@ static struct inode *romfs_iget(struct super_block *sb, unsigned long pos)
+
+ 	set_nlink(i, 1);		/* Hard to decide.. */
+ 	i->i_size = be32_to_cpu(ri.size);
+-	i->i_mtime.tv_sec = i->i_atime.tv_sec = inode_set_ctime(i, 0, 0).tv_sec;
+-	i->i_mtime.tv_nsec = i->i_atime.tv_nsec = 0;
++	i->i_mtime = i->i_atime = inode_set_ctime(i, 0, 0);
+
+ 	/* set up mode and ops */
+ 	mode = romfs_modemap[nextfh & ROMFH_TYPE];
