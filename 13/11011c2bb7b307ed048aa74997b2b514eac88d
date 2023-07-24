@@ -223,3 +223,87 @@ index d63543187359..2af347669db7 100644
 
         if (unlikely(extra & cpu_to_le32(EXT4_EPOCH_MASK)))
                 ts.tv_sec += (u64)(le32_to_cpu(extra) & EXT4_EPOCH_MASK) << 32;
+
+The following fixup was folded into this patch.
+===============================================
+
+Subject: [PATCH v2] ext4: fix the time handling macros when ext4 is using small inodes
+X-Date: Wed, 19 Jul 2023 12:32:19 +0200
+X-URI: https://lore.kernel.org/lkml/20230719-ctime-v2-1-869825696d6d@kernel.org
+
+If ext4 is using small on-disk inodes, then it may not be able to store
+fine grained timestamps. It also can't store the i_crtime at all in that
+case since that fully lives in the extended part of the inode.
+
+979492850abd got the EXT4_EINODE_{GET,SET}_XTIME macros wrong, and would
+still store the tv_sec field of the i_crtime into the raw_inode, even
+when they were small, corrupting adjacent memory.
+
+This fixes those macros to skip setting anything in the raw_inode if the
+tv_sec field doesn't fit, and to properly return a {0,0} timestamp when
+the raw_inode doesn't support it.
+
+Also, fix a bug in ctime handling during rename. It was updating the
+renamed inode's ctime twice rather than the old directory.
+
+Cc: Jan Kara <jack@suse.cz>
+Fixes: 979492850abd ("ext4: convert to ctime accessor functions")
+Reported-by: Hugh Dickins <hughd@google.com>
+Tested-by: Hugh Dickins <hughd@google.com>
+Signed-off-by: Jeff Layton <jlayton@kernel.org>
+---
+Changes in v2:
+- also fix incorrect ctime update in ext4_rename
+---
+ fs/ext4/ext4.h  | 17 ++++++++++++-----
+ fs/ext4/namei.c |  2 +-
+ 2 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/fs/ext4/ext4.h b/fs/ext4/ext4.h
+index 2af347669db7..1e2259d9967d 100644
+--- a/fs/ext4/ext4.h
++++ b/fs/ext4/ext4.h
+@@ -900,8 +900,10 @@ do {                                                                               \
+ #define EXT4_INODE_SET_CTIME(inode, raw_inode)                                 \
+        EXT4_INODE_SET_XTIME_VAL(i_ctime, inode, raw_inode, inode_get_ctime(inode))
+
+-#define EXT4_EINODE_SET_XTIME(xtime, einode, raw_inode)                               \
+-       EXT4_INODE_SET_XTIME_VAL(xtime, &((einode)->vfs_inode), raw_inode, (einode)->xtime)
++#define EXT4_EINODE_SET_XTIME(xtime, einode, raw_inode)                                \
++       if (EXT4_FITS_IN_INODE(raw_inode, einode, xtime))                       \
++               EXT4_INODE_SET_XTIME_VAL(xtime, &((einode)->vfs_inode),         \
++                                        raw_inode, (einode)->xtime)
+
+ #define EXT4_INODE_GET_XTIME_VAL(xtime, inode, raw_inode)                      \
+        (EXT4_FITS_IN_INODE(raw_inode, EXT4_I(inode), xtime ## _extra) ?        \
+@@ -922,9 +924,14 @@ do {                                                                               \
+                EXT4_INODE_GET_XTIME_VAL(i_ctime, inode, raw_inode));           \
+ } while (0)
+
+-#define EXT4_EINODE_GET_XTIME(xtime, einode, raw_inode)                               \
+-do {                                                                          \
+-       (einode)->xtime = EXT4_INODE_GET_XTIME_VAL(xtime, &(einode->vfs_inode), raw_inode);     \
++#define EXT4_EINODE_GET_XTIME(xtime, einode, raw_inode)                                \
++do {                                                                           \
++       if (EXT4_FITS_IN_INODE(raw_inode, einode, xtime))                       \
++               (einode)->xtime =                                               \
++                       EXT4_INODE_GET_XTIME_VAL(xtime, &(einode->vfs_inode),   \
++                                                raw_inode);                    \
++       else                                                                    \
++               (einode)->xtime = (struct timespec64){0, 0};                    \
+ } while (0)
+
+ #define i_disk_version osd1.linux1.l_i_version
+diff --git a/fs/ext4/namei.c b/fs/ext4/namei.c
+index 07f6d96ebc60..933ad03f4f58 100644
+--- a/fs/ext4/namei.c
++++ b/fs/ext4/namei.c
+@@ -3957,7 +3957,7 @@ static int ext4_rename(struct mnt_idmap *idmap, struct inode *old_dir,
+                ext4_dec_count(new.inode);
+                inode_set_ctime_current(new.inode);
+        }
+-       old.dir->i_mtime = inode_set_ctime_current(old.inode);
++       old.dir->i_mtime = inode_set_ctime_current(old.dir);
+        ext4_update_dx_flag(old.dir);
+        if (old.dir_bh) {
+                retval = ext4_rename_dir_finish(handle, &old, new.dir->i_ino);
