@@ -18,6 +18,8 @@ dentry_operations
 prototypes::
 
 	int (*d_revalidate)(struct dentry *, unsigned int);
+	int (*d_revalidate_name)(struct dentry *, const struct qstr *,
+				 unsigned int);
 	int (*d_weak_revalidate)(struct dentry *, unsigned int);
 	int (*d_hash)(const struct dentry *, struct qstr *);
 	int (*d_compare)(const struct dentry *,
@@ -37,6 +39,7 @@ locking rules:
 ops		   rename_lock	->d_lock	may block	rcu-walk
 ================== ===========	========	==============	========
 d_revalidate:	   no		no		yes (ref-walk)	maybe
+d_revalidate_name: no		no		yes (ref-walk)	maybe
 d_weak_revalidate: no		no		yes	 	no
 d_hash		   no		no		no		maybe
 d_compare:	   yes		no		no		maybe

@@ -1252,6 +1252,8 @@ defined:
 
 	struct dentry_operations {
 		int (*d_revalidate)(struct dentry *, unsigned int);
+		int (*d_revalidate_name)(struct dentry *, const struct qstr *,
+					 unsigned int);
 		int (*d_weak_revalidate)(struct dentry *, unsigned int);
 		int (*d_hash)(const struct dentry *, struct qstr *);
 		int (*d_compare)(const struct dentry *,
@@ -1287,6 +1289,16 @@ defined:
 	If a situation is encountered that rcu-walk cannot handle,
 	return
 	-ECHILD and it will be called again in ref-walk mode.
+
+``d_revalidate_name``
+	Variant of d_revalidate that also provides the name under look-up.  Most
+	filesystems will keep it as NULL, unless there are particular semantics
+	for filenames encoding that need to be handled during dentry
+	revalidation.
+
+	When available, it is called in lieu of d_revalidate and has the same
+	locking rules and return semantics.  Refer to d_revalidate for more
+	information.
 
 ``d_weak_revalidate``
 	called when the VFS needs to revalidate a "jumped" dentry.  This
