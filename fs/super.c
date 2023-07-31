@@ -603,9 +603,11 @@ retry:
 	return s;
 
 share_extant_sb:
-	if (user_ns != old->s_user_ns) {
+	if (user_ns != old->s_user_ns || fc->exclusive) {
 		spin_unlock(&sb_lock);
 		destroy_unused_super(s);
+		if (fc->exclusive)
+			infofc(fc, "reusing existing superblock not allowed");
 		return ERR_PTR(-EBUSY);
 	}
 	if (!grab_super(old))
