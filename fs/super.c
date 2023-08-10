@@ -41,6 +41,18 @@
 
 static int thaw_super_locked(struct super_block *sb);
 
+/*
+ * Usage:
+ * - sb_lock
+ *   protects @super_blocks
+ * - fs_supers_lock
+ *   protects @fs_supers, @sb_count
+ *
+ * Ordering:
+ * sb_lock
+ *   fs_supers_lock
+ *
+ */
 static LIST_HEAD(super_blocks);
 static DEFINE_SPINLOCK(sb_lock);
 
@@ -279,37 +291,46 @@ fail:
 
 /* Superblock refcounting  */
 
-/*
- * Drop a superblock's refcount.  The caller must hold sb_lock.
+ /*
+ * At this point the superblock is already unhashed from sb->s_type->fs_supers.
+ * So iterating over @super_blocks will discount this super block. This thing
+ * is dead and better not show up anywhere else. So drop the super block from
+ * @super_blocks and free it.
  */
 static void __put_super(struct super_block *s)
 {
-	if (!--s->s_count) {
-		list_del_init(&s->s_list);
-		WARN_ON(s->s_dentry_lru.node);
-		WARN_ON(s->s_inode_lru.node);
-		WARN_ON(!list_empty(&s->s_mounts));
-		security_sb_free(s);
-		put_user_ns(s->s_user_ns);
-		kfree(s->s_subtype);
-		call_rcu(&s->rcu, destroy_super_rcu);
-	}
+	/* delete it from @super_blocks */
+	list_del_init(&s->s_list);
+	WARN_ON(s->s_dentry_lru.node);
+	WARN_ON(s->s_inode_lru.node);
+	WARN_ON(!list_empty(&s->s_mounts));
+	security_sb_free(s);
+	put_user_ns(s->s_user_ns);
+	kfree(s->s_subtype);
+	call_rcu(&s->rcu, destroy_super_rcu);
 }
 
 /**
- *	put_super	-	drop a temporary reference to superblock
- *	@sb: superblock in question
+ * put_super - drop a temporary reference to superblock
+ * @sb: superblock in question
  *
- *	Drops a temporary reference, frees superblock if there's no
- *	references left.
+ * Drops a temporary reference, frees superblock if there's no references left.
  */
 void put_super(struct super_block *sb)
 {
+	int count;
+
+	if (!sb)
+		return;
+
 	spin_lock(&sb_lock);
-	__put_super(sb);
+	fs_supers_lock(sb->s_type);
+	count = --sb->s_count;
+	fs_supers_unlock(sb->s_type);
+	if (!count)
+		__put_super(sb);
 	spin_unlock(&sb_lock);
 }
-
 
 /**
  *	deactivate_locked_super	-	drop an active reference to superblock
@@ -371,16 +392,16 @@ EXPORT_SYMBOL(deactivate_super);
  *	Tries to acquire an active reference.  grab_super() is used when we
  * 	had just found a superblock in super_blocks or fs_type->fs_supers
  *	and want to turn it into a full-blown active reference.  grab_super()
- *	is called with sb_lock held and drops it.  Returns 1 in case of
+ *	is called with fs_super_lock held and drops it.  Returns 1 in case of
  *	success, 0 if we had failed (superblock contents was already dead or
  *	dying when grab_super() had been called).  Note that this is only
  *	called for superblocks not in rundown mode (== ones still on ->fs_supers
  *	of their type), so increment of ->s_count is OK here.
  */
-static int grab_super(struct super_block *s) __releases(sb_lock)
+static int grab_super(struct super_block *s) __releases(s->s_type->fs_supers_lock)
 {
 	s->s_count++;
-	spin_unlock(&sb_lock);
+	fs_supers_unlock(s->s_type);
 	down_write(&s->s_umount);
 	if ((s->s_flags & SB_BORN) && atomic_inc_not_zero(&s->s_active)) {
 		put_super(s);
@@ -517,10 +538,10 @@ void generic_shutdown_super(struct super_block *sb)
 			spin_unlock(&sb->s_inode_list_lock);
 		}
 	}
-	spin_lock(&sb_lock);
+	fs_supers_lock(sb->s_type);
 	/* should be initialized for __put_super_and_need_restart() */
 	hlist_del_init(&sb->s_instances);
-	spin_unlock(&sb_lock);
+	fs_supers_unlock(sb->s_type);
 	up_write(&sb->s_umount);
 	if (sb->s_bdi != &noop_backing_dev_info) {
 		if (sb->s_iflags & SB_I_PERSB_BDI)
@@ -582,7 +603,7 @@ struct super_block *sget_fc(struct fs_context *fc,
 	int err;
 
 retry:
-	spin_lock(&sb_lock);
+	fs_supers_lock(fc->fs_type);
 	if (test) {
 		hlist_for_each_entry(old, &fc->fs_type->fs_supers, s_instances) {
 			if (test(old, fc))
@@ -590,7 +611,7 @@ retry:
 		}
 	}
 	if (!s) {
-		spin_unlock(&sb_lock);
+		fs_supers_unlock(fc->fs_type);
 		s = alloc_super(fc->fs_type, fc->sb_flags, user_ns);
 		if (!s)
 			return ERR_PTR(-ENOMEM);
@@ -601,7 +622,7 @@ retry:
 	err = set(s, fc);
 	if (err) {
 		s->s_fs_info = NULL;
-		spin_unlock(&sb_lock);
+		fs_supers_unlock(fc->fs_type);
 		destroy_unused_super(s);
 		return ERR_PTR(err);
 	}
@@ -609,16 +630,26 @@ retry:
 	s->s_type = fc->fs_type;
 	s->s_iflags |= fc->s_iflags;
 	strscpy(s->s_id, s->s_type->name, sizeof(s->s_id));
-	list_add_tail(&s->s_list, &super_blocks);
 	hlist_add_head(&s->s_instances, &s->s_type->fs_supers);
+	fs_supers_unlock(fc->fs_type);
+
+	/*
+	 * This is a newly allocated superblock. So the fact that it doesn't
+	 * show up on @super_blocks right away doesn't matter as all iterators
+	 * over @super_block expect sb->s_root and SB_BORN to be set and so
+	 * this superblock would be skipped anyway.
+	 */
+	spin_lock(&sb_lock);
+	list_add_tail(&s->s_list, &super_blocks);
 	spin_unlock(&sb_lock);
+
 	get_filesystem(s->s_type);
 	register_shrinker_prepared(&s->s_shrink);
 	return s;
 
 share_extant_sb:
 	if (user_ns != old->s_user_ns || fc->exclusive) {
-		spin_unlock(&sb_lock);
+		fs_supers_unlock(fc->fs_type);
 		destroy_unused_super(s);
 		if (fc->exclusive)
 			warnfc(fc, "reusing existing filesystem not allowed");
@@ -660,13 +691,13 @@ struct super_block *sget(struct file_system_type *type,
 		user_ns = &init_user_ns;
 
 retry:
-	spin_lock(&sb_lock);
+	fs_supers_lock(type);
 	if (test) {
 		hlist_for_each_entry(old, &type->fs_supers, s_instances) {
 			if (!test(old, data))
 				continue;
 			if (user_ns != old->s_user_ns) {
-				spin_unlock(&sb_lock);
+				fs_supers_unlock(type);
 				destroy_unused_super(s);
 				return ERR_PTR(-EBUSY);
 			}
@@ -677,7 +708,7 @@ retry:
 		}
 	}
 	if (!s) {
-		spin_unlock(&sb_lock);
+		fs_supers_unlock(type);
 		s = alloc_super(type, (flags & ~SB_SUBMOUNT), user_ns);
 		if (!s)
 			return ERR_PTR(-ENOMEM);
@@ -686,15 +717,25 @@ retry:
 
 	err = set(s, data);
 	if (err) {
-		spin_unlock(&sb_lock);
+		fs_supers_unlock(type);
 		destroy_unused_super(s);
 		return ERR_PTR(err);
 	}
 	s->s_type = type;
 	strscpy(s->s_id, type->name, sizeof(s->s_id));
-	list_add_tail(&s->s_list, &super_blocks);
 	hlist_add_head(&s->s_instances, &type->fs_supers);
+	fs_supers_unlock(type);
+
+	/*
+	 * This is a newly allocated superblock. So the fact that it doesn't
+	 * show up on @super_blocks right away doesn't matter as all iterators
+	 * over @super_block expect sb->s_root and SB_BORN to be set and so
+	 * this superblock would be skipped anyway.
+	 */
+	spin_lock(&sb_lock);
+	list_add_tail(&s->s_list, &super_blocks);
 	spin_unlock(&sb_lock);
+
 	get_filesystem(type);
 	register_shrinker_prepared(&s->s_shrink);
 	return s;
@@ -722,21 +763,26 @@ static void __iterate_supers(void (*f)(struct super_block *))
 
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (hlist_unhashed(&sb->s_instances))
+		fs_supers_lock(sb->s_type);
+
+		if (hlist_unhashed(&sb->s_instances)) {
+			fs_supers_unlock(sb->s_type);
 			continue;
-		sb->s_count++;
+		}
+
 		spin_unlock(&sb_lock);
+
+		sb->s_count++;
+		fs_supers_unlock(sb->s_type);
 
 		f(sb);
 
-		spin_lock(&sb_lock);
-		if (p)
-			__put_super(p);
+		put_super(p);
 		p = sb;
+		spin_lock(&sb_lock);
 	}
-	if (p)
-		__put_super(p);
 	spin_unlock(&sb_lock);
+	put_super(p);
 }
 /**
  *	iterate_supers - call function for all active superblocks
@@ -752,24 +798,29 @@ void iterate_supers(void (*f)(struct super_block *, void *), void *arg)
 
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (hlist_unhashed(&sb->s_instances))
+		fs_supers_lock(sb->s_type);
+
+		if (hlist_unhashed(&sb->s_instances)) {
+			fs_supers_unlock(sb->s_type);
 			continue;
-		sb->s_count++;
+		}
+
 		spin_unlock(&sb_lock);
+
+		sb->s_count++;
+		fs_supers_unlock(sb->s_type);
 
 		down_read(&sb->s_umount);
 		if (sb->s_root && (sb->s_flags & SB_BORN))
 			f(sb, arg);
 		up_read(&sb->s_umount);
 
-		spin_lock(&sb_lock);
-		if (p)
-			__put_super(p);
+		put_super(p);
 		p = sb;
+		spin_lock(&sb_lock);
 	}
-	if (p)
-		__put_super(p);
 	spin_unlock(&sb_lock);
+	put_super(p);
 }
 
 /**
@@ -786,24 +837,22 @@ void iterate_supers_type(struct file_system_type *type,
 {
 	struct super_block *sb, *p = NULL;
 
-	spin_lock(&sb_lock);
+	fs_supers_lock(type);
 	hlist_for_each_entry(sb, &type->fs_supers, s_instances) {
 		sb->s_count++;
-		spin_unlock(&sb_lock);
+		fs_supers_unlock(type);
 
 		down_read(&sb->s_umount);
 		if (sb->s_root && (sb->s_flags & SB_BORN))
 			f(sb, arg);
 		up_read(&sb->s_umount);
 
-		spin_lock(&sb_lock);
-		if (p)
-			__put_super(p);
+		put_super(p);
 		p = sb;
+		fs_supers_lock(type);
 	}
-	if (p)
-		__put_super(p);
-	spin_unlock(&sb_lock);
+	fs_supers_unlock(type);
+	put_super(p);
 }
 
 EXPORT_SYMBOL(iterate_supers_type);
@@ -823,17 +872,25 @@ struct super_block *get_active_super(struct block_device *bdev)
 	if (!bdev)
 		return NULL;
 
-restart:
+rescan:
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (hlist_unhashed(&sb->s_instances))
+		fs_supers_lock(sb->s_type);
+		if (hlist_unhashed(&sb->s_instances)) {
+			fs_supers_unlock(sb->s_type);
 			continue;
+		}
+
+		spin_unlock(&sb_lock);
+
 		if (sb->s_bdev == bdev) {
 			if (!grab_super(sb))
-				goto restart;
+				goto rescan;
 			up_write(&sb->s_umount);
 			return sb;
 		}
+		fs_supers_unlock(sb->s_type);
+		spin_lock(&sb_lock);
 	}
 	spin_unlock(&sb_lock);
 	return NULL;
@@ -843,14 +900,20 @@ struct super_block *user_get_super(dev_t dev, bool excl)
 {
 	struct super_block *sb;
 
-	spin_lock(&sb_lock);
 rescan:
+	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (hlist_unhashed(&sb->s_instances))
+		fs_supers_lock(sb->s_type);
+		if (hlist_unhashed(&sb->s_instances)) {
+			fs_supers_unlock(sb->s_type);
 			continue;
-		if (sb->s_dev ==  dev) {
+		}
+
+		spin_unlock(&sb_lock);
+
+		if (sb->s_dev == dev) {
 			sb->s_count++;
-			spin_unlock(&sb_lock);
+			fs_supers_unlock(sb->s_type);
 			if (excl)
 				down_write(&sb->s_umount);
 			else
@@ -862,11 +925,13 @@ rescan:
 				up_write(&sb->s_umount);
 			else
 				up_read(&sb->s_umount);
+
 			/* nope, got unmounted */
-			spin_lock(&sb_lock);
-			__put_super(sb);
+			put_super(sb);
 			goto rescan;
 		}
+		fs_supers_unlock(sb->s_type);
+		spin_lock(&sb_lock);
 	}
 	spin_unlock(&sb_lock);
 	return NULL;
@@ -1284,12 +1349,12 @@ int setup_bdev_super(struct super_block *sb, int sb_flags,
 		blkdev_put(bdev, sb);
 		return -EBUSY;
 	}
-	spin_lock(&sb_lock);
+	fs_supers_lock(sb->s_type);
 	sb->s_bdev = bdev;
 	sb->s_bdi = bdi_get(bdev->bd_disk->bdi);
 	if (bdev_stable_writes(bdev))
 		sb->s_iflags |= SB_I_STABLE_WRITES;
-	spin_unlock(&sb_lock);
+	fs_supers_unlock(sb->s_type);
 	mutex_unlock(&bdev->bd_fsfreeze_mutex);
 
 	snprintf(sb->s_id, sizeof(sb->s_id), "%pg", bdev);
