@@ -447,6 +447,7 @@ static const struct file_operations hypfs_file_ops = {
 };
 
 static struct file_system_type hypfs_type = {
+	FSTYPE_INIT_COMMON(hypfs_type),
 	.owner		= THIS_MODULE,
 	.name		= "s390_hypfs",
 	.init_fs_context = hypfs_init_fs_context,

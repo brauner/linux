@@ -498,6 +498,7 @@ static void devpts_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type devpts_fs_type = {
+	FSTYPE_INIT_COMMON(devpts_fs_type),
 	.name		= "devpts",
 	.mount		= devpts_mount,
 	.kill_sb	= devpts_kill_sb,

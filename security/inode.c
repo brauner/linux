@@ -67,6 +67,7 @@ static int securityfs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type fs_type = {
+	FSTYPE_INIT_COMMON(fs_type),
 	.owner =	THIS_MODULE,
 	.name =		"securityfs",
 	.init_fs_context = securityfs_init_fs_context,

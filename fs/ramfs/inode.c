@@ -285,6 +285,7 @@ void ramfs_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type ramfs_fs_type = {
+	FSTYPE_INIT_COMMON(ramfs_fs_type),
 	.name		= "ramfs",
 	.init_fs_context = ramfs_init_fs_context,
 	.parameters	= ramfs_fs_parameters,

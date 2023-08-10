@@ -663,6 +663,7 @@ static struct dentry *msdos_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type msdos_fs_type = {
+	FSTYPE_INIT_COMMON(msdos_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "msdos",
 	.mount		= msdos_mount,

@@ -7267,6 +7267,7 @@ static void ext4_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type ext4_fs_type = {
+	FSTYPE_INIT_COMMON(ext4_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "ext4",
 	.init_fs_context	= ext4_init_fs_context,

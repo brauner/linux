@@ -810,6 +810,7 @@ static struct linux_binfmt misc_format = {
 };
 
 static struct file_system_type bm_fs_type = {
+	FSTYPE_INIT_COMMON(bm_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "binfmt_misc",
 	.init_fs_context = bm_init_fs_context,

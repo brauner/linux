@@ -356,6 +356,7 @@ static int bd_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type bd_type = {
+	FSTYPE_INIT_COMMON(bd_type),
 	.name		= "bdev",
 	.init_fs_context = bd_init_fs_context,
 	.kill_sb	= kill_anon_super,

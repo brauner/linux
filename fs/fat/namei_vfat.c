@@ -1208,6 +1208,7 @@ static struct dentry *vfat_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type vfat_fs_type = {
+	FSTYPE_INIT_COMMON(vfat_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "vfat",
 	.mount		= vfat_mount,

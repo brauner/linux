@@ -689,6 +689,7 @@ static struct dentry *minix_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type minix_fs_type = {
+	FSTYPE_INIT_COMMON(minix_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "minix",
 	.mount		= minix_mount,

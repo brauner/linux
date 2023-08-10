@@ -4212,6 +4212,7 @@ int shmem_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type shmem_fs_type = {
+	FSTYPE_INIT_COMMON(shmem_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "tmpfs",
 	.init_fs_context = shmem_init_fs_context,
@@ -4328,6 +4329,7 @@ struct kobj_attribute shmem_enabled_attr = __ATTR_RW(shmem_enabled);
  */
 
 static struct file_system_type shmem_fs_type = {
+	FSTYPE_INIT_COMMON(shmem_fs_type),
 	.name		= "tmpfs",
 	.init_fs_context = ramfs_init_fs_context,
 	.parameters	= ramfs_fs_parameters,

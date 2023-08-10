@@ -937,6 +937,7 @@ static void erofs_put_super(struct super_block *sb)
 }
 
 struct file_system_type erofs_fs_type = {
+	FSTYPE_INIT_COMMON(erofs_fs_type),
 	.owner          = THIS_MODULE,
 	.name           = "erofs",
 	.init_fs_context = erofs_init_fs_context,

@@ -775,6 +775,7 @@ static void exfat_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type exfat_fs_type = {
+	FSTYPE_INIT_COMMON(exfat_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "exfat",
 	.init_fs_context	= exfat_init_fs_context,

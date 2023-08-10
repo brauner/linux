@@ -1611,6 +1611,7 @@ ffs_fs_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type ffs_fs_type = {
+	FSTYPE_INIT_COMMON(ffs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "functionfs",
 	.init_fs_context = ffs_fs_init_fs_context,

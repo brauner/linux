@@ -100,6 +100,7 @@ static const struct super_operations ibmasmfs_s_ops = {
 static const struct file_operations *ibmasmfs_dir_ops = &simple_dir_operations;
 
 static struct file_system_type ibmasmfs_type = {
+	FSTYPE_INIT_COMMON(ibmasmfs_type),
 	.owner          = THIS_MODULE,
 	.name           = "ibmasmfs",
 	.init_fs_context = ibmasmfs_init_fs_context,

@@ -1509,6 +1509,7 @@ static struct dentry *ufs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type ufs_fs_type = {
+	FSTYPE_INIT_COMMON(ufs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "ufs",
 	.mount		= ufs_mount,

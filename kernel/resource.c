@@ -1976,6 +1976,7 @@ static int iomem_fs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type iomem_fs_type = {
+	FSTYPE_INIT_COMMON(iomem_fs_type),
 	.name		= "iomem",
 	.owner		= THIS_MODULE,
 	.init_fs_context = iomem_fs_init_fs_context,

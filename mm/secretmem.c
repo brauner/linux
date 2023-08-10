@@ -271,6 +271,7 @@ static int secretmem_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type secretmem_fs = {
+	FSTYPE_INIT_COMMON(secretmem_fs),
 	.name		= "secretmem",
 	.init_fs_context = secretmem_init_fs_context,
 	.kill_sb	= kill_anon_super,

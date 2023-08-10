@@ -41,6 +41,7 @@ static int afs_init_fs_context(struct fs_context *fc);
 static const struct fs_parameter_spec afs_fs_parameters[];
 
 struct file_system_type afs_fs_type = {
+	FSTYPE_INIT_COMMON(afs_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "afs",
 	.init_fs_context	= afs_init_fs_context,

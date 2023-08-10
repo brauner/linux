@@ -112,6 +112,7 @@ static int configfs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type configfs_fs_type = {
+	FSTYPE_INIT_COMMON(configfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "configfs",
 	.init_fs_context = configfs_init_fs_context,

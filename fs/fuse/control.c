@@ -366,6 +366,7 @@ static void fuse_ctl_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type fuse_ctl_fs_type = {
+	FSTYPE_INIT_COMMON(fuse_ctl_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "fusectl",
 	.init_fs_context = fuse_ctl_init_fs_context,

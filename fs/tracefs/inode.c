@@ -392,6 +392,7 @@ static struct dentry *trace_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type trace_fs_type = {
+	FSTYPE_INIT_COMMON(trace_fs_type),
 	.owner =	THIS_MODULE,
 	.name =		"tracefs",
 	.mount =	trace_mount,

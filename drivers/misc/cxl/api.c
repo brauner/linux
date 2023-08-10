@@ -41,6 +41,7 @@ static int cxl_fs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type cxl_fs_type = {
+	FSTYPE_INIT_COMMON(cxl_fs_type),
 	.name		= "cxl",
 	.owner		= THIS_MODULE,
 	.init_fs_context = cxl_fs_init_fs_context,

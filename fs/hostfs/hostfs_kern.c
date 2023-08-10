@@ -987,6 +987,7 @@ static void hostfs_kill_sb(struct super_block *s)
 }
 
 static struct file_system_type hostfs_type = {
+	FSTYPE_INIT_COMMON(hostfs_type),
 	.owner 		= THIS_MODULE,
 	.name 		= "hostfs",
 	.mount	 	= hostfs_read_sb,

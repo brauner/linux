@@ -1378,6 +1378,7 @@ static void zonefs_kill_super(struct super_block *sb)
  * File system definition and registration.
  */
 static struct file_system_type zonefs_type = {
+	FSTYPE_INIT_COMMON(zonefs_type),
 	.owner		= THIS_MODULE,
 	.name		= "zonefs",
 	.mount		= zonefs_mount,

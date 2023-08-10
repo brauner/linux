@@ -1110,6 +1110,7 @@ cifs_setlease(struct file *file, long arg, struct file_lock **lease, void **priv
 }
 
 struct file_system_type cifs_fs_type = {
+	FSTYPE_INIT_COMMON(cifs_fs_type),
 	.owner = THIS_MODULE,
 	.name = "cifs",
 	.init_fs_context = smb3_init_fs_context,
@@ -1120,6 +1121,7 @@ struct file_system_type cifs_fs_type = {
 MODULE_ALIAS_FS("cifs");
 
 struct file_system_type smb3_fs_type = {
+	FSTYPE_INIT_COMMON(smb3_fs_type),
 	.owner = THIS_MODULE,
 	.name = "smb3",
 	.init_fs_context = smb3_init_fs_context,

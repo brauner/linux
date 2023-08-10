@@ -456,6 +456,7 @@ static struct dentry *bfs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type bfs_fs_type = {
+	FSTYPE_INIT_COMMON(bfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "bfs",
 	.mount		= bfs_mount,

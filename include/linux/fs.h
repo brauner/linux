@@ -2225,6 +2225,7 @@ struct file_system_type {
 	struct module *owner;
 	struct file_system_type * next;
 	struct hlist_head fs_supers;
+	spinlock_t fs_supers_lock;
 
 	struct lock_class_key s_lock_key;
 	struct lock_class_key s_umount_key;
@@ -2236,6 +2237,19 @@ struct file_system_type {
 	struct lock_class_key invalidate_lock_key;
 	struct lock_class_key i_mutex_dir_key;
 };
+
+#define FSTYPE_INIT_COMMON(fs_type) \
+	.fs_supers_lock = __SPIN_LOCK_UNLOCKED(fs_type.fs_supers_lock)
+
+static inline void fs_supers_lock(struct file_system_type *fs)
+{
+	spin_lock(&fs->fs_supers_lock);
+}
+
+static inline void fs_supers_unlock(struct file_system_type *fs)
+{
+	spin_unlock(&fs->fs_supers_lock);
+}
 
 #define MODULE_ALIAS_FS(NAME) MODULE_ALIAS("fs-" NAME)
 

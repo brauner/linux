@@ -978,6 +978,7 @@ befs_mount(struct file_system_type *fs_type, int flags, const char *dev_name,
 }
 
 static struct file_system_type befs_fs_type = {
+	FSTYPE_INIT_COMMON(befs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "befs",
 	.mount		= befs_mount,

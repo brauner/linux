@@ -420,6 +420,7 @@ static int sockfs_init_fs_context(struct fs_context *fc)
 static struct vfsmount *sock_mnt __read_mostly;
 
 static struct file_system_type sock_fs_type = {
+	FSTYPE_INIT_COMMON(sock_fs_type),
 	.name =		"sockfs",
 	.init_fs_context = sockfs_init_fs_context,
 	.kill_sb =	kill_anon_super,

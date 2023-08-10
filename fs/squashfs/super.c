@@ -674,6 +674,7 @@ static void squashfs_free_inode(struct inode *inode)
 }
 
 static struct file_system_type squashfs_fs_type = {
+	FSTYPE_INIT_COMMON(squashfs_fs_type),
 	.owner = THIS_MODULE,
 	.name = "squashfs",
 	.init_fs_context = squashfs_init_fs_context,

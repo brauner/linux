@@ -36,6 +36,7 @@ static void efs_kill_sb(struct super_block *s)
 }
 
 static struct file_system_type efs_fs_type = {
+	FSTYPE_INIT_COMMON(efs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "efs",
 	.mount		= efs_mount,

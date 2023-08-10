@@ -1565,6 +1565,7 @@ static struct dentry *isofs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type iso9660_fs_type = {
+	FSTYPE_INIT_COMMON(iso9660_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "iso9660",
 	.mount		= isofs_mount,

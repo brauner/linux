@@ -1540,6 +1540,7 @@ static int hugetlbfs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type hugetlbfs_fs_type = {
+	FSTYPE_INIT_COMMON(hugetlbfs_fs_type),
 	.name			= "hugetlbfs",
 	.init_fs_context	= hugetlbfs_init_fs_context,
 	.parameters		= hugetlb_fs_parameters,

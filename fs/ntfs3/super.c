@@ -1727,6 +1727,7 @@ static void ntfs3_kill_sb(struct super_block *sb)
 
 // clang-format off
 static struct file_system_type ntfs_fs_type = {
+	FSTYPE_INIT_COMMON(ntfs_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "ntfs3",
 	.init_fs_context	= ntfs_init_fs_context,

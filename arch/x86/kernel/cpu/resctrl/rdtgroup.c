@@ -2798,6 +2798,7 @@ static void rdt_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type rdt_fs_type = {
+	FSTYPE_INIT_COMMON(rdt_fs_type),
 	.name			= "resctrl",
 	.init_fs_context	= rdt_init_fs_context,
 	.parameters		= rdt_fs_parameters,

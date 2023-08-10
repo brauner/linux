@@ -1796,6 +1796,7 @@ static void gfs2_kill_sb(struct super_block *sb)
 }
 
 struct file_system_type gfs2_fs_type = {
+	FSTYPE_INIT_COMMON(gfs2_fs_type),
 	.name = "gfs2",
 	.fs_flags = FS_REQUIRES_DEV,
 	.init_fs_context = gfs2_init_fs_context,
@@ -1806,6 +1807,7 @@ struct file_system_type gfs2_fs_type = {
 MODULE_ALIAS_FS("gfs2");
 
 struct file_system_type gfs2meta_fs_type = {
+	FSTYPE_INIT_COMMON(gfs2meta_fs_type),
 	.name = "gfs2meta",
 	.fs_flags = FS_REQUIRES_DEV,
 	.init_fs_context = gfs2_meta_init_fs_context,

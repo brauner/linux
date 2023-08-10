@@ -321,6 +321,7 @@ static struct dentry *coda_mount(struct file_system_type *fs_type,
 }
 
 struct file_system_type coda_fs_type = {
+	FSTYPE_INIT_COMMON(coda_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "coda",
 	.mount		= coda_mount,

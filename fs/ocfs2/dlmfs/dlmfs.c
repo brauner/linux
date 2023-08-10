@@ -564,6 +564,7 @@ static struct dentry *dlmfs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type dlmfs_fs_type = {
+	FSTYPE_INIT_COMMON(dlmfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "ocfs2_dlmfs",
 	.mount		= dlmfs_mount,

@@ -763,6 +763,7 @@ nomem:
 }
 
 static struct file_system_type spufs_type = {
+	FSTYPE_INIT_COMMON(spufs_type),
 	.owner = THIS_MODULE,
 	.name = "spufs",
 	.init_fs_context = spufs_init_fs_context,

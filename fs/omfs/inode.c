@@ -604,6 +604,7 @@ static struct dentry *omfs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type omfs_fs_type = {
+	FSTYPE_INIT_COMMON(omfs_fs_type),
 	.owner = THIS_MODULE,
 	.name = "omfs",
 	.mount = omfs_mount,

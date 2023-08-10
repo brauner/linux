@@ -1504,6 +1504,7 @@ static int virtio_fs_init_fs_context(struct fs_context *fsc)
 }
 
 static struct file_system_type virtio_fs_type = {
+	FSTYPE_INIT_COMMON(virtio_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "virtiofs",
 	.init_fs_context = virtio_fs_init_fs_context,

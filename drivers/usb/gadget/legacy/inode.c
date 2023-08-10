@@ -2107,6 +2107,7 @@ gadgetfs_kill_sb (struct super_block *sb)
 /*----------------------------------------------------------------------*/
 
 static struct file_system_type gadgetfs_type = {
+	FSTYPE_INIT_COMMON(gadgetfs_type),
 	.owner		= THIS_MODULE,
 	.name		= shortname,
 	.init_fs_context = gadgetfs_init_fs_context,

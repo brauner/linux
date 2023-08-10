@@ -1625,6 +1625,7 @@ out:
 #endif
 
 static struct file_system_type ext2_fs_type = {
+	FSTYPE_INIT_COMMON(ext2_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "ext2",
 	.mount		= ext2_mount,

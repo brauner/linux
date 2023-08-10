@@ -1187,6 +1187,7 @@ static struct dentry *ocfs2_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type ocfs2_fs_type = {
+	FSTYPE_INIT_COMMON(ocfs2_fs_type),
 	.owner          = THIS_MODULE,
 	.name           = "ocfs2",
 	.mount          = ocfs2_mount,

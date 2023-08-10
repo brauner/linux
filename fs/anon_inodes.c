@@ -50,6 +50,7 @@ static int anon_inodefs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type anon_inode_fs_type = {
+	FSTYPE_INIT_COMMON(anon_inode_fs_type),
 	.name		= "anon_inodefs",
 	.init_fs_context = anon_inodefs_init_fs_context,
 	.kill_sb	= kill_anon_super,

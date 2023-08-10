@@ -460,6 +460,7 @@ static struct dentry *adfs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type adfs_fs_type = {
+	FSTYPE_INIT_COMMON(adfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "adfs",
 	.mount		= adfs_mount,

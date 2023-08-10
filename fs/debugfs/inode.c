@@ -301,6 +301,7 @@ static struct dentry *debug_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type debug_fs_type = {
+	FSTYPE_INIT_COMMON(debug_fs_type),
 	.owner =	THIS_MODULE,
 	.name =		"debugfs",
 	.mount =	debug_mount,

@@ -795,6 +795,7 @@ static int bpf_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type bpf_fs_type = {
+	FSTYPE_INIT_COMMON(bpf_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "bpf",
 	.init_fs_context = bpf_init_fs_context,

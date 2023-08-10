@@ -1367,6 +1367,7 @@ nilfs_mount(struct file_system_type *fs_type, int flags,
 }
 
 struct file_system_type nilfs_fs_type = {
+	FSTYPE_INIT_COMMON(nilfs_fs_type),
 	.owner    = THIS_MODULE,
 	.name     = "nilfs2",
 	.mount    = nilfs_mount,

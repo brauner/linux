@@ -642,6 +642,7 @@ static struct dentry *qnx6_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type qnx6_fs_type = {
+	FSTYPE_INIT_COMMON(qnx6_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "qnx6",
 	.mount		= qnx6_mount,

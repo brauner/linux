@@ -1385,6 +1385,7 @@ static void ceph_kill_sb(struct super_block *s)
 }
 
 static struct file_system_type ceph_fs_type = {
+	FSTYPE_INIT_COMMON(ceph_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "ceph",
 	.init_fs_context = ceph_init_fs_context,

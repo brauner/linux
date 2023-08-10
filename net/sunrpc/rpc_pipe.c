@@ -1464,6 +1464,7 @@ out:
 }
 
 static struct file_system_type rpc_pipe_fs_type = {
+	FSTYPE_INIT_COMMON(rpc_pipe_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "rpc_pipefs",
 	.init_fs_context = rpc_init_fs_context,

@@ -395,6 +395,7 @@ static int dax_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type dax_fs_type = {
+	FSTYPE_INIT_COMMON(dax_fs_type),
 	.name		= "dax",
 	.init_fs_context = dax_init_fs_context,
 	.kill_sb	= kill_anon_super,

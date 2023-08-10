@@ -2631,6 +2631,7 @@ static void __exit exit_reiserfs_fs(void)
 }
 
 struct file_system_type reiserfs_fs_type = {
+	FSTYPE_INIT_COMMON(reiserfs_fs_type),
 	.owner = THIS_MODULE,
 	.name = "reiserfs",
 	.mount = get_super_block,

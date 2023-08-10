@@ -80,6 +80,7 @@ static struct dentry *public_dev_mount(struct file_system_type *fs_type, int fla
 }
 
 static struct file_system_type internal_fs_type = {
+	FSTYPE_INIT_COMMON(internal_fs_type),
 	.name = "devtmpfs",
 #ifdef CONFIG_TMPFS
 	.init_fs_context = shmem_init_fs_context,
@@ -90,6 +91,7 @@ static struct file_system_type internal_fs_type = {
 };
 
 static struct file_system_type dev_fs_type = {
+	FSTYPE_INIT_COMMON(dev_fs_type),
 	.name = "devtmpfs",
 	.mount = public_dev_mount,
 };

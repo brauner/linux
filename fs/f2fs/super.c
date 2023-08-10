@@ -4880,6 +4880,7 @@ static void kill_f2fs_super(struct super_block *sb)
 }
 
 static struct file_system_type f2fs_fs_type = {
+	FSTYPE_INIT_COMMON(f2fs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "f2fs",
 	.mount		= f2fs_mount,

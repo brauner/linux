@@ -973,6 +973,7 @@ static int cramfs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type cramfs_fs_type = {
+	FSTYPE_INIT_COMMON(cramfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "cramfs",
 	.init_fs_context = cramfs_init_fs_context,

@@ -481,6 +481,7 @@ static void pstore_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type pstore_fs_type = {
+	FSTYPE_INIT_COMMON(pstore_fs_type),
 	.owner          = THIS_MODULE,
 	.name		= "pstore",
 	.mount		= pstore_mount,

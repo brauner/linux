@@ -85,6 +85,7 @@ static int xenfs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type xenfs_type = {
+	FSTYPE_INIT_COMMON(xenfs_type),
 	.owner =	THIS_MODULE,
 	.name =		"xenfs",
 	.init_fs_context = xenfs_init_fs_context,

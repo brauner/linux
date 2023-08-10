@@ -291,6 +291,7 @@ static void efivarfs_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type efivarfs_type = {
+	FSTYPE_INIT_COMMON(efivarfs_type),
 	.owner   = THIS_MODULE,
 	.name    = "efivarfs",
 	.init_fs_context = efivarfs_init_fs_context,

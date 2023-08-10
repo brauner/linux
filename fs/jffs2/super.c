@@ -350,6 +350,7 @@ static void jffs2_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type jffs2_fs_type = {
+	FSTYPE_INIT_COMMON(jffs2_fs_type),
 	.owner =	THIS_MODULE,
 	.name =		"jffs2",
 	.init_fs_context = jffs2_init_fs_context,

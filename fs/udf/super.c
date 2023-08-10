@@ -126,6 +126,7 @@ static struct dentry *udf_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type udf_fstype = {
+	FSTYPE_INIT_COMMON(udf_fstype),
 	.owner		= THIS_MODULE,
 	.name		= "udf",
 	.mount		= udf_mount,

@@ -530,6 +530,7 @@ int qibfs_remove(struct qib_devdata *dd)
 }
 
 static struct file_system_type qibfs_fs_type = {
+	FSTYPE_INIT_COMMON(qibfs_fs_type),
 	.owner =        THIS_MODULE,
 	.name =         "ipathfs",
 	.init_fs_context = qibfs_init_fs_context,

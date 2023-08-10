@@ -195,6 +195,7 @@ static int apparmorfs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type aafs_ops = {
+	FSTYPE_INIT_COMMON(aafs_ops),
 	.owner = THIS_MODULE,
 	.name = AAFS_NAME,
 	.init_fs_context = apparmorfs_init_fs_context,

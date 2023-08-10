@@ -2355,6 +2355,7 @@ static void kill_ubifs_super(struct super_block *s)
 }
 
 static struct file_system_type ubifs_fs_type = {
+	FSTYPE_INIT_COMMON(ubifs_fs_type),
 	.name    = "ubifs",
 	.owner   = THIS_MODULE,
 	.mount   = ubifs_mount,

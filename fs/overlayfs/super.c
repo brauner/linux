@@ -1480,6 +1480,7 @@ out_err:
 }
 
 static struct file_system_type ovl_fs_type = {
+	FSTYPE_INIT_COMMON(ovl_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "overlay",
 	.init_fs_context	= ovl_init_fs_context,

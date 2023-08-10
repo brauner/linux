@@ -45,6 +45,7 @@ MODULE_PARM_DESC(hash_table_size,
 		 "size of hash table for operations in progress");
 
 static struct file_system_type orangefs_fs_type = {
+	FSTYPE_INIT_COMMON(orangefs_fs_type),
 	.name = "pvfs2",
 	.mount = orangefs_mount,
 	.kill_sb = orangefs_kill_sb,

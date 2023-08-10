@@ -123,6 +123,7 @@ static int dma_buf_fs_init_context(struct fs_context *fc)
 }
 
 static struct file_system_type dma_buf_fs_type = {
+	FSTYPE_INIT_COMMON(dma_buf_fs_type),
 	.name = "dmabuf",
 	.init_fs_context = dma_buf_fs_init_context,
 	.kill_sb = kill_anon_super,

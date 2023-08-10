@@ -527,6 +527,7 @@ static int drm_fs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type drm_fs_type = {
+	FSTYPE_INIT_COMMON(drm_fs_type),
 	.name		= "drm",
 	.owner		= THIS_MODULE,
 	.init_fs_context = drm_fs_init_fs_context,

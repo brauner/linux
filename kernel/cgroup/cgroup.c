@@ -2292,6 +2292,7 @@ static void cgroup_kill_sb(struct super_block *sb)
 }
 
 struct file_system_type cgroup_fs_type = {
+	FSTYPE_INIT_COMMON(cgroup_fs_type),
 	.name			= "cgroup",
 	.init_fs_context	= cgroup_init_fs_context,
 	.parameters		= cgroup1_fs_parameters,
@@ -2300,6 +2301,7 @@ struct file_system_type cgroup_fs_type = {
 };
 
 static struct file_system_type cgroup2_fs_type = {
+	FSTYPE_INIT_COMMON(cgroup2_fs_type),
 	.name			= "cgroup2",
 	.init_fs_context	= cgroup_init_fs_context,
 	.parameters		= cgroup2_fs_parameters,

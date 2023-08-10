@@ -789,6 +789,7 @@ static void binderfs_kill_super(struct super_block *sb)
 }
 
 static struct file_system_type binder_fs_type = {
+	FSTYPE_INIT_COMMON(binder_fs_type),
 	.name			= "binder",
 	.init_fs_context	= binderfs_init_fs_context,
 	.parameters		= binderfs_fs_parameters,

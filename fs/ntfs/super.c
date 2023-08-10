@@ -3058,6 +3058,7 @@ static struct dentry *ntfs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type ntfs_fs_type = {
+	FSTYPE_INIT_COMMON(ntfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "ntfs",
 	.mount		= ntfs_mount,

@@ -1817,6 +1817,7 @@ static void fuse_kill_sb_anon(struct super_block *sb)
 }
 
 static struct file_system_type fuse_fs_type = {
+	FSTYPE_INIT_COMMON(fuse_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "fuse",
 	.fs_flags	= FS_HAS_SUBTYPE | FS_USERNS_MOUNT,
@@ -1835,6 +1836,7 @@ static void fuse_kill_sb_blk(struct super_block *sb)
 }
 
 static struct file_system_type fuseblk_fs_type = {
+	FSTYPE_INIT_COMMON(fuseblk_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "fuseblk",
 	.init_fs_context = fuse_init_fs_context,

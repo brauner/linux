@@ -338,6 +338,7 @@ static const struct super_operations v9fs_super_ops_dotl = {
 };
 
 struct file_system_type v9fs_fs_type = {
+	FSTYPE_INIT_COMMON(v9fs_fs_type),
 	.name = "9p",
 	.mount = v9fs_mount,
 	.kill_sb = v9fs_kill_super,

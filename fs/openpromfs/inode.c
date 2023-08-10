@@ -425,6 +425,7 @@ static int openpromfs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type openprom_fs_type = {
+	FSTYPE_INIT_COMMON(openprom_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "openpromfs",
 	.init_fs_context = openpromfs_init_fs_context,

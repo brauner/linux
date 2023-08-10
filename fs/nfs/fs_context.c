@@ -1645,6 +1645,7 @@ static int nfs_init_fs_context(struct fs_context *fc)
 }
 
 struct file_system_type nfs_fs_type = {
+	FSTYPE_INIT_COMMON(nfs_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "nfs",
 	.init_fs_context	= nfs_init_fs_context,
@@ -1657,6 +1658,7 @@ EXPORT_SYMBOL_GPL(nfs_fs_type);
 
 #if IS_ENABLED(CONFIG_NFS_V4)
 struct file_system_type nfs4_fs_type = {
+	FSTYPE_INIT_COMMON(nfs4_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "nfs4",
 	.init_fs_context	= nfs_init_fs_context,

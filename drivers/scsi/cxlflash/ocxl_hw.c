@@ -40,6 +40,7 @@ static int ocxlflash_fs_init_fs_context(struct fs_context *fc)
 }
 
 static struct file_system_type ocxlflash_fs_type = {
+	FSTYPE_INIT_COMMON(ocxlflash_fs_type),
 	.name		= "ocxlflash",
 	.owner		= THIS_MODULE,
 	.init_fs_context = ocxlflash_fs_init_fs_context,

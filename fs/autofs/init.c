@@ -14,6 +14,7 @@ static struct dentry *autofs_mount(struct file_system_type *fs_type,
 }
 
 struct file_system_type autofs_fs_type = {
+	FSTYPE_INIT_COMMON(autofs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "autofs",
 	.mount		= autofs_mount,

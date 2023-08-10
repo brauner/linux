@@ -2139,6 +2139,7 @@ static void btrfs_kill_super(struct super_block *sb)
 }
 
 static struct file_system_type btrfs_fs_type = {
+	FSTYPE_INIT_COMMON(btrfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "btrfs",
 	.mount		= btrfs_mount,
@@ -2147,6 +2148,7 @@ static struct file_system_type btrfs_fs_type = {
 };
 
 static struct file_system_type btrfs_root_fs_type = {
+	FSTYPE_INIT_COMMON(btrfs_root_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "btrfs",
 	.mount		= btrfs_mount_root,

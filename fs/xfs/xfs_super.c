@@ -2028,6 +2028,7 @@ xfs_kill_sb(
 }
 
 static struct file_system_type xfs_fs_type = {
+	FSTYPE_INIT_COMMON(xfs_fs_type),
 	.owner			= THIS_MODULE,
 	.name			= "xfs",
 	.init_fs_context	= xfs_init_fs_context,

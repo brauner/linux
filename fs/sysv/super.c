@@ -541,6 +541,7 @@ static struct dentry *v7_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type sysv_fs_type = {
+	FSTYPE_INIT_COMMON(sysv_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "sysv",
 	.mount		= sysv_mount,
@@ -550,6 +551,7 @@ static struct file_system_type sysv_fs_type = {
 MODULE_ALIAS_FS("sysv");
 
 static struct file_system_type v7_fs_type = {
+	FSTYPE_INIT_COMMON(v7_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "v7",
 	.mount		= v7_mount,

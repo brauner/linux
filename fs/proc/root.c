@@ -275,6 +275,7 @@ static void proc_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type proc_fs_type = {
+	FSTYPE_INIT_COMMON(proc_fs_type),
 	.name			= "proc",
 	.init_fs_context	= proc_init_fs_context,
 	.parameters		= proc_fs_parameters,

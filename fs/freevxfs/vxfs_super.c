@@ -289,6 +289,7 @@ static struct dentry *vxfs_mount(struct file_system_type *fs_type,
 }
 
 static struct file_system_type vxfs_fs_type = {
+	FSTYPE_INIT_COMMON(vxfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "vxfs",
 	.mount		= vxfs_mount,

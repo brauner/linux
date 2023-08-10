@@ -902,6 +902,7 @@ static const struct export_operations jfs_export_operations = {
 };
 
 static struct file_system_type jfs_fs_type = {
+	FSTYPE_INIT_COMMON(jfs_fs_type),
 	.owner		= THIS_MODULE,
 	.name		= "jfs",
 	.mount		= jfs_do_mount,

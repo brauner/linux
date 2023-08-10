@@ -291,6 +291,7 @@ static int aio_init_fs_context(struct fs_context *fc)
 static int __init aio_setup(void)
 {
 	static struct file_system_type aio_fs = {
+		FSTYPE_INIT_COMMON(aio_fs),
 		.name		= "aio",
 		.init_fs_context = aio_init_fs_context,
 		.kill_sb	= kill_anon_super,

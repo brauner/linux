@@ -1680,6 +1680,7 @@ static const struct fs_context_operations mqueue_fs_context_ops = {
 };
 
 static struct file_system_type mqueue_fs_type = {
+	FSTYPE_INIT_COMMON(mqueue_fs_type),
 	.name			= "mqueue",
 	.init_fs_context	= mqueue_init_fs_context,
 	.kill_sb		= kill_litter_super,

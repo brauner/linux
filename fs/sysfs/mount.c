@@ -88,6 +88,7 @@ static void sysfs_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type sysfs_fs_type = {
+	FSTYPE_INIT_COMMON(sysfs_fs_type),
 	.name			= "sysfs",
 	.init_fs_context	= sysfs_init_fs_context,
 	.kill_sb		= sysfs_kill_sb,
