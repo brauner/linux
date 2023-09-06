@@ -530,20 +530,12 @@ EXPORT_SYMBOL(deactivate_super);
  *	called for superblocks not in rundown mode (== ones still on ->fs_supers
  *	of their type), so increment of ->s_count is OK here.
  */
-static int grab_super(struct super_block *s) __releases(sb_lock)
+static bool grab_super(struct super_block *s)
 {
-	bool born;
-
-	s->s_count++;
-	spin_unlock(&sb_lock);
-	born = super_lock_excl(s);
-	if (born && atomic_inc_not_zero(&s->s_active)) {
-		put_super(s);
-		return 1;
-	}
+	if (super_lock_excl(s) && atomic_inc_not_zero(&s->s_active))
+		return true;
 	super_unlock_excl(s);
-	put_super(s);
-	return 0;
+	return false;
 }
 
 static inline bool wait_dead(struct super_block *sb)
@@ -574,6 +566,7 @@ static bool grab_super_dead(struct super_block *sb)
 {
 
 	sb->s_count++;
+	spin_unlock(&sb_lock);
 	if (grab_super(sb)) {
 		put_super(sb);
 		lockdep_assert_held(&sb->s_umount);
@@ -1469,9 +1462,73 @@ static void fs_bdev_sync(struct block_device *bdev)
 	super_unlock_shared(sb);
 }
 
+static int fs_bdev_freeze(struct block_device *bdev)
+__releases(&bdev->bd_holder_lock)
+{
+	struct super_block *sb = bdev->bd_holder;
+	bool grabbed;
+	int error = 0;
+
+	lockdep_assert_held(&bdev->bd_holder_lock);
+
+	grabbed = sb && grab_super(sb);
+	/*
+	 * We have grabbed an active reference which means that the
+	 * superblock and the block device cannot go away now. But we
+	 * might end up holding the last reference and so end up
+	 * shutting the superblock down when we call deactivate_super().
+	 * So we can and need to drop @bdev->bd_holder_lock to avoid
+	 * deadlocks with blkdev_put().
+	 */
+	mutex_unlock(&bdev->bd_holder_lock);
+
+	if (grabbed) {
+		super_unlock_excl(sb);
+
+		if (sb->s_op->freeze_super)
+			error = sb->s_op->freeze_super(sb, FREEZE_HOLDER_USERSPACE);
+		else
+			error = freeze_super(sb, FREEZE_HOLDER_USERSPACE);
+
+		deactivate_super(sb);
+	}
+
+	if (!error)
+		sync_blockdev(bdev);
+
+	return error;
+}
+
+static int fs_bdev_thaw(struct block_device *bdev)
+__releases(&bdev->bd_holder_lock)
+{
+
+	struct super_block *sb = bdev->bd_holder;
+
+	lockdep_assert_held(&bdev->bd_holder_lock);
+
+	WARN(!sb, "Missing superblock while thawing!");
+
+	/*
+	 * We hold an active from when we froze the filesystem. So the
+	 * superblock and block device cannot go away. This might be the
+	 * last reference to the superblock and so we might end up
+	 * shutting it down when we thaw it. So we can and need to drop
+	 * @bdev->bd_holder_lock to avoid deadlocks with blkdev_put().
+	 */
+	mutex_unlock(&bdev->bd_holder_lock);
+
+	if (sb->s_op->thaw_super)
+		return sb->s_op->thaw_super(sb, FREEZE_HOLDER_USERSPACE);
+
+	return thaw_super(sb, FREEZE_HOLDER_USERSPACE);
+}
+
 const struct blk_holder_ops fs_holder_ops = {
 	.mark_dead		= fs_bdev_mark_dead,
 	.sync			= fs_bdev_sync,
+	.freeze			= fs_bdev_freeze,
+	.thaw			= fs_bdev_thaw,
 };
 EXPORT_SYMBOL_GPL(fs_holder_ops);
 
@@ -1499,15 +1556,10 @@ int setup_bdev_super(struct super_block *sb, int sb_flags,
 	}
 
 	/*
-	 * Until SB_BORN flag is set, there can be no active superblock
-	 * references and thus no filesystem freezing. get_active_super() will
-	 * just loop waiting for SB_BORN so even bdev_freeze() cannot proceed.
-	 *
-	 * It is enough to check bdev was not frozen before we set s_bdev.
+	 * It is enough to check bdev was not frozen before we set
+	 * s_bdev as freezing will wait until SB_BORN is set.
 	 */
-	mutex_lock(&bdev->bd_fsfreeze_mutex);
-	if (bdev->bd_fsfreeze_count > 0) {
-		mutex_unlock(&bdev->bd_fsfreeze_mutex);
+	if (atomic_read(&bdev->bd_fsfreeze_count) > 0) {
 		if (fc)
 			warnf(fc, "%pg: Can't mount, blockdev is frozen", bdev);
 		blkdev_put(bdev, sb);
@@ -1519,7 +1571,6 @@ int setup_bdev_super(struct super_block *sb, int sb_flags,
 	if (bdev_stable_writes(bdev))
 		sb->s_iflags |= SB_I_STABLE_WRITES;
 	spin_unlock(&sb_lock);
-	mutex_unlock(&bdev->bd_fsfreeze_mutex);
 
 	snprintf(sb->s_id, sizeof(sb->s_id), "%pg", bdev);
 	shrinker_debugfs_rename(&sb->s_shrink, "sb-%s:%s", sb->s_type->name,
