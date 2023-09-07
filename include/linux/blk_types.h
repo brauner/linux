@@ -63,7 +63,6 @@ struct block_device {
 
 	/* Mutex for freeze */
 	struct mutex		bd_fsfreeze_mutex;
-	struct super_block	*bd_fsfreeze_sb;
 
 	struct partition_meta_info *bd_meta_info;
 #ifdef CONFIG_FAIL_MAKE_REQUEST
