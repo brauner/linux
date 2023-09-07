@@ -56,14 +56,11 @@ struct block_device {
 	void *			bd_holder;
 	const struct blk_holder_ops *bd_holder_ops;
 	struct mutex		bd_holder_lock;
-	/* The counter of freeze processes */
-	atomic_t		bd_fsfreeze_count;
 	int			bd_holders;
 	struct kobject		*bd_holder_dir;
 
-	/* Mutex for freeze */
-	struct mutex		bd_fsfreeze_mutex;
-	struct super_block	*bd_fsfreeze_sb;
+	/* The counter of freeze processes */
+	atomic_t		bd_fsfreeze_count;
 
 	struct partition_meta_info *bd_meta_info;
 #ifdef CONFIG_FAIL_MAKE_REQUEST
