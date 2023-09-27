@@ -1045,3 +1045,28 @@ filesystem type is now moved to a later point when the devices are closed:
 As this is a VFS level change it has no practical consequences for filesystems
 other than that all of them must use one of the provided kill_litter_super(),
 kill_anon_super(), or kill_block_super() helpers.
+
+---
+
+**mandatory**
+
+Block device freezing and thawing have been moved to holder operations. As we
+can now go straight from block devcie to superblock the get_active_super()
+and bd_fsfreeze_sb members in struct block_device are gone.
+
+The bd_fsfreeze_mutex is gone as well since we can rely on the bd_holder_lock
+to protect against concurrent freeze and thaw.
+
+Before this change, get_active_super() would only be able to find the
+superblock of the main block device, i.e., the one stored in sb->s_bdev. Block
+device freezing now works for any block device owned by a given superblock, not
+just the main block device.
+
+When thawing we now grab an active reference so we can hold bd_holder_lock
+across thaw without the risk of deadlocks (because the superblock goes away
+which would require us to take bd_holder_lock). That allows us to get rid of
+bd_fsfreeze_mutex. Currently we just reacquire s_umount after thaw_super() and
+drop the active reference we took before. This someone could grab an active
+reference before we dropped the last one. This shouldn't be an issue. If it
+turns out to be one we can reshuffle the code to simply hold s_umount when
+thaw_super() returns and drop the reference.
