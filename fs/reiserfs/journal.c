@@ -2613,8 +2613,14 @@ static int journal_init_dev(struct super_block *super,
 
 	/* there is no "jdev" option and journal is on separate device */
 	if ((!jdev_name || !jdev_name[0])) {
+		/*
+		 * Opening of block devices can't happen under s_umount,
+		 * see the comment in get_tree_bdev() for more details
+		 */
+		up_write(&super->s_umount);
 		journal->j_dev_bd = blkdev_get_by_dev(jdev, blkdev_mode, super,
 						      &fs_holder_ops);
+		down_write(&super->s_umount);
 		if (IS_ERR(journal->j_dev_bd)) {
 			result = PTR_ERR(journal->j_dev_bd);
 			journal->j_dev_bd = NULL;
@@ -2628,8 +2634,14 @@ static int journal_init_dev(struct super_block *super,
 		return 0;
 	}
 
+	/*
+	 * Opening of block devices can't happen under s_umount,
+	 * see the comment in get_tree_bdev() for more details
+	 */
+	up_write(&super->s_umount);
 	journal->j_dev_bd = blkdev_get_by_path(jdev_name, blkdev_mode, super,
 					       &fs_holder_ops);
+	down_write(&super->s_umount);
 	if (IS_ERR(journal->j_dev_bd)) {
 		result = PTR_ERR(journal->j_dev_bd);
 		journal->j_dev_bd = NULL;
