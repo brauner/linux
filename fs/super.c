@@ -76,6 +76,11 @@ static inline void super_unlock_excl(struct super_block *sb)
 	super_unlock(sb, true);
 }
 
+static inline void __super_lock_shared(struct super_block *sb)
+{
+	__super_lock(sb, false);
+}
+
 static inline void super_unlock_shared(struct super_block *sb)
 {
 	super_unlock(sb, false);
@@ -1428,9 +1433,9 @@ EXPORT_SYMBOL(sget_dev);
  */
 static bool super_lock_shared_active(struct super_block *sb)
 {
-	bool born = super_lock_shared(sb);
-
-	if (!born || !sb->s_root || !(sb->s_flags & SB_ACTIVE)) {
+	__super_lock_shared(sb);
+	if (!(sb->s_flags & SB_BORN) || !sb->s_root ||
+	    !(sb->s_flags & SB_ACTIVE)) {
 		super_unlock_shared(sb);
 		return false;
 	}
