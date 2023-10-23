@@ -37,6 +37,11 @@ struct bio_crypt_ctx;
 #define PAGE_SECTORS		(1 << PAGE_SECTORS_SHIFT)
 #define SECTOR_MASK		(PAGE_SECTORS - 1)
 
+enum bd_claim {
+	BD_CLAIM_DEFAULT = 0,
+	BD_CLAIM_ACQUIRE = 1,
+};
+
 struct block_device {
 	sector_t		bd_start_sect;
 	sector_t		bd_nr_sectors;
@@ -52,7 +57,7 @@ struct block_device {
 	atomic_t		bd_openers;
 	spinlock_t		bd_size_lock; /* for bd_inode->i_size updates */
 	struct inode *		bd_inode;	/* will die */
-	void *			bd_claiming;
+	enum bd_claim		bd_claim;
 	void *			bd_holder;
 	const struct blk_holder_ops *bd_holder_ops;
 	struct mutex		bd_holder_lock;
