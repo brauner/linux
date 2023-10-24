@@ -469,6 +469,11 @@ static bool bd_may_claim(struct block_device *bdev, void *holder,
 				return false;
 			return true;
 		}
+
+		if ((whole->bd_claim == BD_CLAIM_YIELD) &&
+		    (bdev->bd_holder_ops == hops))
+			return true;
+
 		return false;
 	}
 
@@ -608,6 +613,7 @@ static void bd_end_claim(struct block_device *bdev, void *holder)
 		mutex_unlock(&bdev->bd_holder_lock);
 		if (bdev->bd_write_holder)
 			unblock = true;
+		bd_clear_claiming(whole);
 	}
 	if (!whole->bd_holders)
 		whole->bd_holder = NULL;
@@ -953,6 +959,20 @@ void bdev_release(struct bdev_handle *handle)
 	kfree(handle);
 }
 EXPORT_SYMBOL(bdev_release);
+
+void bdev_yield(struct bdev_handle *handle)
+{
+	struct block_device *bdev = handle->bdev;
+	struct block_device *whole = bdev_whole(bdev);
+
+	mutex_lock(&bdev_lock);
+	WARN_ON_ONCE(bdev->bd_holders == 0);
+	WARN_ON_ONCE(bdev->bd_holder != handle->holder);
+	WARN_ON_ONCE(whole->bd_claim);
+	whole->bd_claim = BD_CLAIM_YIELD;
+	mutex_unlock(&bdev_lock);
+}
+EXPORT_SYMBOL(bdev_yield);
 
 /**
  * lookup_bdev() - Look up a struct block_device by name.

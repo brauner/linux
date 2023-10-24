@@ -40,6 +40,7 @@ struct bio_crypt_ctx;
 enum bd_claim {
 	BD_CLAIM_DEFAULT = 0,
 	BD_CLAIM_ACQUIRE = 1,
+	BD_CLAIM_YIELD   = 2,
 };
 
 struct block_device {
