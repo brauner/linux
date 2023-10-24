@@ -1170,6 +1170,32 @@ xfs_fs_shutdown(
 	xfs_force_shutdown(XFS_M(sb), SHUTDOWN_DEVICE_REMOVED);
 }
 
+static void xfs_fs_bdev_yield(struct bdev_handle *handle,
+			      struct super_block *sb)
+{
+	if (handle != sb->s_bdev_handle)
+		bdev_yield(handle);
+}
+
+static void
+xfs_fs_yield_devices(
+	struct super_block *sb)
+{
+	struct xfs_mount	*mp = XFS_M(sb);
+
+	if (mp) {
+		if (mp->m_logdev_targp &&
+		    mp->m_logdev_targp != mp->m_ddev_targp)
+			xfs_fs_bdev_yield(mp->m_logdev_targp->bt_bdev_handle, sb);
+		if (mp->m_rtdev_targp)
+			xfs_fs_bdev_yield(mp->m_rtdev_targp->bt_bdev_handle, sb);
+		if (mp->m_ddev_targp)
+			xfs_fs_bdev_yield(mp->m_ddev_targp->bt_bdev_handle, sb);
+	}
+
+	bdev_yield(sb->s_bdev_handle);
+}
+
 static const struct super_operations xfs_super_operations = {
 	.alloc_inode		= xfs_fs_alloc_inode,
 	.destroy_inode		= xfs_fs_destroy_inode,
@@ -1184,6 +1210,7 @@ static const struct super_operations xfs_super_operations = {
 	.nr_cached_objects	= xfs_fs_nr_cached_objects,
 	.free_cached_objects	= xfs_fs_free_cached_objects,
 	.shutdown		= xfs_fs_shutdown,
+	.yield_devices		= xfs_fs_yield_devices,
 };
 
 static int

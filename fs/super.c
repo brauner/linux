@@ -87,10 +87,10 @@ static inline bool wait_born(struct super_block *sb)
 
 	/*
 	 * Pairs with smp_store_release() in super_wake() and ensures
-	 * that we see SB_BORN or SB_DYING after we're woken.
+	 * that we see SB_BORN or SB_DEAD after we're woken.
 	 */
 	flags = smp_load_acquire(&sb->s_flags);
-	return flags & (SB_BORN | SB_DYING);
+	return flags & (SB_BORN | SB_DEAD);
 }
 
 /**
@@ -101,12 +101,12 @@ static inline bool wait_born(struct super_block *sb)
  * If the superblock has neither passed through vfs_get_tree() or
  * generic_shutdown_super() yet wait for it to happen. Either superblock
  * creation will succeed and SB_BORN is set by vfs_get_tree() or we're
- * woken and we'll see SB_DYING.
+ * woken and we'll see SB_DEAD.
  *
  * The caller must have acquired a temporary reference on @sb->s_count.
  *
  * Return: The function returns true if SB_BORN was set and with
- *         s_umount held. The function returns false if SB_DYING was
+ *         s_umount held. The function returns false if SB_DEAD was
  *         set and without s_umount held.
  */
 static __must_check bool super_lock(struct super_block *sb, bool excl)
@@ -122,7 +122,7 @@ relock:
 	 * @sb->s_root is NULL and @sb->s_active is 0. No one needs to
 	 * grab a reference to this. Tell them so.
 	 */
-	if (sb->s_flags & SB_DYING) {
+	if (sb->s_flags & SB_DEAD) {
 		super_unlock(sb, excl);
 		return false;
 	}
@@ -137,7 +137,7 @@ relock:
 	wait_var_event(&sb->s_flags, wait_born(sb));
 
 	/*
-	 * Neither SB_BORN nor SB_DYING are ever unset so we never loop.
+	 * Neither SB_BORN nor SB_DEAD are ever unset so we never loop.
 	 * Just reacquire @sb->s_umount for the caller.
 	 */
 	goto relock;
@@ -439,18 +439,17 @@ void put_super(struct super_block *sb)
 
 static void kill_super_notify(struct super_block *sb)
 {
-	lockdep_assert_not_held(&sb->s_umount);
+	const struct super_operations *sop = sb->s_op;
 
-	/* already notified earlier */
-	if (sb->s_flags & SB_DEAD)
-		return;
+	lockdep_assert_held(&sb->s_umount);
+
+	/* Allow openers to wait for the devices to be cleaned up. */
+	if (sop->yield_devices)
+		sop->yield_devices(sb);
 
 	/*
 	 * Remove it from @fs_supers so it isn't found by new
-	 * sget{_fc}() walkers anymore. Any concurrent mounter still
-	 * managing to grab a temporary reference is guaranteed to
-	 * already see SB_DYING and will wait until we notify them about
-	 * SB_DEAD.
+	 * sget{_fc}() walkers anymore.
 	 */
 	spin_lock(&sb_lock);
 	hlist_del_init(&sb->s_instances);
@@ -459,7 +458,7 @@ static void kill_super_notify(struct super_block *sb)
 	/*
 	 * Let concurrent mounts know that this thing is really dead.
 	 * We don't need @sb->s_umount here as every concurrent caller
-	 * will see SB_DYING and either discard the superblock or wait
+	 * will see SB_DEAD and either discard the superblock or wait
 	 * for SB_DEAD.
 	 */
 	super_wake(sb, SB_DEAD);
@@ -482,8 +481,6 @@ void deactivate_locked_super(struct super_block *s)
 	if (atomic_dec_and_test(&s->s_active)) {
 		unregister_shrinker(&s->s_shrink);
 		fs->kill_sb(s);
-
-		kill_super_notify(s);
 
 		/*
 		 * Since list_lru_destroy() may sleep, we cannot call it from
@@ -583,7 +580,7 @@ static bool grab_super(struct super_block *sb)
 bool super_trylock_shared(struct super_block *sb)
 {
 	if (down_read_trylock(&sb->s_umount)) {
-		if (!(sb->s_flags & SB_DYING) && sb->s_root &&
+		if (!(sb->s_flags & SB_DEAD) && sb->s_root &&
 		    (sb->s_flags & SB_BORN))
 			return true;
 		super_unlock_shared(sb);
@@ -689,16 +686,9 @@ void generic_shutdown_super(struct super_block *sb)
 			spin_unlock(&sb->s_inode_list_lock);
 		}
 	}
-	/*
-	 * Broadcast to everyone that grabbed a temporary reference to this
-	 * superblock before we removed it from @fs_supers that the superblock
-	 * is dying. Every walker of @fs_supers outside of sget{_fc}() will now
-	 * discard this superblock and treat it as dead.
-	 *
-	 * We leave the superblock on @fs_supers so it can be found by
-	 * sget{_fc}() until we passed sb->kill_sb().
-	 */
-	super_wake(sb, SB_DYING);
+
+	kill_super_notify(sb);
+
 	super_unlock_excl(sb);
 	if (sb->s_bdi != &noop_backing_dev_info) {
 		if (sb->s_iflags & SB_I_PERSB_BDI)
@@ -790,7 +780,7 @@ retry:
 	/*
 	 * Make the superblock visible on @super_blocks and @fs_supers.
 	 * It's in a nascent state and users should wait on SB_BORN or
-	 * SB_DYING to be set.
+	 * SB_DEAD to be set.
 	 */
 	list_add_tail(&s->s_list, &super_blocks);
 	hlist_add_head(&s->s_instances, &s->s_type->fs_supers);
@@ -906,7 +896,7 @@ static void __iterate_supers(void (*f)(struct super_block *))
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
 		/* Pairs with memory marrier in super_wake(). */
-		if (smp_load_acquire(&sb->s_flags) & SB_DYING)
+		if (smp_load_acquire(&sb->s_flags) & SB_DEAD)
 			continue;
 		sb->s_count++;
 		spin_unlock(&sb_lock);
@@ -1248,7 +1238,6 @@ void kill_anon_super(struct super_block *sb)
 {
 	dev_t dev = sb->s_dev;
 	generic_shutdown_super(sb);
-	kill_super_notify(sb);
 	free_anon_bdev(dev);
 }
 EXPORT_SYMBOL(kill_anon_super);

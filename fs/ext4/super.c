@@ -1477,6 +1477,17 @@ static void ext4_shutdown(struct super_block *sb)
        ext4_force_shutdown(sb, EXT4_GOING_FLAGS_NOLOGFLUSH);
 }
 
+static void ext4_yield_devices(struct super_block *sb)
+{
+	struct ext4_sb_info *sbi = sb->s_fs_info;
+	struct bdev_handle *journal_bdev_handle =
+		sbi ? sbi->s_journal_bdev_handle : NULL;
+
+	if (journal_bdev_handle)
+		bdev_yield(journal_bdev_handle);
+	bdev_yield(sb->s_bdev_handle);
+}
+
 static void init_once(void *foo)
 {
 	struct ext4_inode_info *ei = foo;
@@ -1638,6 +1649,7 @@ static const struct super_operations ext4_sops = {
 	.statfs		= ext4_statfs,
 	.show_options	= ext4_show_options,
 	.shutdown	= ext4_shutdown,
+	.yield_devices	= ext4_yield_devices,
 #ifdef CONFIG_QUOTA
 	.quota_read	= ext4_quota_read,
 	.quota_write	= ext4_quota_write,
