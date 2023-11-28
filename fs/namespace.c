@@ -1010,7 +1010,7 @@ void mnt_change_mountpoint(struct mount *parent, struct mountpoint *mp, struct m
 
 static inline struct mount *node_to_mount(struct rb_node *node)
 {
-	return rb_entry(node, struct mount, mnt_node);
+	return node ? rb_entry(node, struct mount, mnt_node) : NULL;
 }
 
 static void mnt_add_to_ns(struct mnt_namespace *ns, struct mount *mnt)
@@ -4999,24 +4999,21 @@ retry:
 	return ret;
 }
 
-static struct mount *listmnt_first(struct mount *root)
+static struct mount *listmnt_next(struct mount *curr)
 {
-	return list_first_entry_or_null(&root->mnt_mounts, struct mount, mnt_child);
+	return node_to_mount(rb_next(&curr->mnt_node));
 }
 
-static struct mount *listmnt_next(struct mount *curr, struct mount *root)
-{
-	return next_mnt(curr, root);
-}
-
-static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
-			    size_t bufsize, const struct path *root)
+static ssize_t do_listmount(struct mount *first, struct vfsmount *mnt,
+			    u64 __user *buf, size_t bufsize,
+			    const struct path *root)
 {
 	struct mount *r, *m = real_mount(mnt);
 	struct path rootmnt = {
 		.mnt = root->mnt,
 		.dentry = root->mnt->mnt_root
 	};
+	struct path orig;
 	ssize_t ctr;
 	int err;
 
@@ -5027,8 +5024,17 @@ static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
 	if (err)
 		return err;
 
-	for (ctr = 0, r = listmnt_first(m); r; r = listmnt_next(r, m)) {
-		if (!is_path_reachable(r, r->mnt.mnt_root, root))
+	if (root->mnt == mnt) {
+		orig = *root;
+	} else {
+		orig.mnt = mnt;
+		orig.dentry = mnt->mnt_root;
+	}
+
+	for (ctr = 0, r = first; r; r = listmnt_next(r)) {
+		if (r == m)
+			continue;
+		if (!is_path_reachable(r, r->mnt.mnt_root, &orig))
 			continue;
 
 		if (ctr >= bufsize)
@@ -5045,8 +5051,10 @@ static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
 SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 		u64 __user *, buf, size_t, bufsize, unsigned int, flags)
 {
+	struct mnt_namespace *ns = current->nsproxy->mnt_ns;
 	struct mnt_id_req kreq;
 	struct vfsmount *mnt;
+	struct mount *first;
 	struct path root;
 	u64 mnt_id;
 	ssize_t ret;
@@ -5066,11 +5074,13 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 		mnt = root.mnt;
 	} else {
 		ret = -ENOENT;
-		mnt = lookup_mnt_in_ns(mnt_id, current->nsproxy->mnt_ns);
+		mnt  = lookup_mnt_in_ns(mnt_id, ns);
 		if (!mnt)
 			goto err;
 	}
-	ret = do_listmount(mnt, buf, bufsize, &root);
+	first = node_to_mount(rb_first(&ns->mounts));
+
+	ret = do_listmount(first, mnt, buf, bufsize, &root);
 err:
 	path_put(&root);
 	up_read(&namespace_sem);
