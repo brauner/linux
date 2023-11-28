@@ -992,7 +992,7 @@ static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
 struct file {
 	union {
 		struct llist_node	f_llist;
-		struct rcu_head 	f_rcuhead;
+		struct callback_head 	f_tw;
 		unsigned int 		f_iocb_flags;
 	};
 

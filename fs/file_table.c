@@ -407,7 +407,7 @@ static void delayed_fput(struct work_struct *unused)
 
 static void ____fput(struct callback_head *work)
 {
-	__fput(container_of(work, struct file, f_rcuhead));
+	__fput(container_of(work, struct file, f_tw));
 }
 
 /*
@@ -438,8 +438,8 @@ void fput(struct file *file)
 			return;
 		}
 		if (likely(!in_interrupt() && !(task->flags & PF_KTHREAD))) {
-			init_task_work(&file->f_rcuhead, ____fput);
-			if (!task_work_add(task, &file->f_rcuhead, TWA_RESUME))
+			init_task_work(&file->f_tw, ____fput);
+			if (!task_work_add(task, &file->f_tw, TWA_RESUME))
 				return;
 			/*
 			 * After this task has run exit_task_work(),
