@@ -5004,37 +5004,26 @@ static struct mount *listmnt_next(struct mount *curr)
 	return node_to_mount(rb_next(&curr->mnt_node));
 }
 
-static ssize_t do_listmount(struct mount *first, struct vfsmount *mnt,
+static ssize_t do_listmount(struct mount *first, struct path *orig, u64 mnt_id,
 			    u64 __user *buf, size_t bufsize,
 			    const struct path *root)
 {
-	struct mount *r, *m = real_mount(mnt);
-	struct path rootmnt = {
-		.mnt = root->mnt,
-		.dentry = root->mnt->mnt_root
-	};
-	struct path orig;
+	struct mount *r;
 	ssize_t ctr;
 	int err;
 
-	if (!is_path_reachable(m, mnt->mnt_root, &rootmnt))
-		return capable(CAP_SYS_ADMIN) ? 0 : -EPERM;
+	if (!capable(CAP_SYS_ADMIN) &&
+	    !is_path_reachable(real_mount(orig->mnt), orig->dentry, root))
+		return -EPERM;
 
-	err = security_sb_statfs(mnt->mnt_root);
+	err = security_sb_statfs(orig->dentry);
 	if (err)
 		return err;
 
-	if (root->mnt == mnt) {
-		orig = *root;
-	} else {
-		orig.mnt = mnt;
-		orig.dentry = mnt->mnt_root;
-	}
-
 	for (ctr = 0, r = first; r; r = listmnt_next(r)) {
-		if (r == m)
+		if (r->mnt_id_unique == mnt_id)
 			continue;
-		if (!is_path_reachable(r, r->mnt.mnt_root, &orig))
+		if (!is_path_reachable(r, r->mnt.mnt_root, orig))
 			continue;
 
 		if (ctr >= bufsize)
@@ -5053,9 +5042,8 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 {
 	struct mnt_namespace *ns = current->nsproxy->mnt_ns;
 	struct mnt_id_req kreq;
-	struct vfsmount *mnt;
 	struct mount *first;
-	struct path root;
+	struct path root, orig;
 	u64 mnt_id;
 	ssize_t ret;
 
@@ -5071,16 +5059,17 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 	down_read(&namespace_sem);
 	get_fs_root(current->fs, &root);
 	if (mnt_id == LSMT_ROOT) {
-		mnt = root.mnt;
+		orig = root;
 	} else {
 		ret = -ENOENT;
-		mnt  = lookup_mnt_in_ns(mnt_id, ns);
-		if (!mnt)
+		orig.mnt  = lookup_mnt_in_ns(mnt_id, ns);
+		if (!orig.mnt)
 			goto err;
+		orig.dentry = orig.mnt->mnt_root;
 	}
 	first = node_to_mount(rb_first(&ns->mounts));
 
-	ret = do_listmount(first, mnt, buf, bufsize, &root);
+	ret = do_listmount(first, &orig, mnt_id, buf, bufsize, &root);
 err:
 	path_put(&root);
 	up_read(&namespace_sem);
