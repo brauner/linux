@@ -4942,7 +4942,7 @@ static int prepare_kstatmount(struct kstatmount *ks, struct mnt_id_req *kreq,
 		return -EFAULT;
 
 	*ks = (struct kstatmount){
-		.mask		= kreq->request_mask,
+		.mask		= kreq->param,
 		.buf		= buf,
 		.bufsize	= bufsize,
 		.seq = {
@@ -5020,14 +5020,11 @@ static ssize_t do_listmount(struct mount *first, struct path *orig, u64 mnt_id,
 	if (err)
 		return err;
 
-	for (ctr = 0, r = first; r; r = listmnt_next(r)) {
+	for (ctr = 0, r = first; r && ctr < bufsize; r = listmnt_next(r)) {
 		if (r->mnt_id_unique == mnt_id)
 			continue;
 		if (!is_path_reachable(r, r->mnt.mnt_root, orig))
 			continue;
-
-		if (ctr >= bufsize)
-			return -EOVERFLOW;
 		ctr = array_index_nospec(ctr, bufsize);
 		if (put_user(r->mnt_id_unique, buf + ctr))
 			return -EFAULT;
@@ -5044,7 +5041,7 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 	struct mnt_id_req kreq;
 	struct mount *first;
 	struct path root, orig;
-	u64 mnt_id;
+	u64 mnt_id, last_mnt_id;
 	ssize_t ret;
 
 	if (flags)
@@ -5052,9 +5049,8 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 
 	if (copy_from_user(&kreq, req, sizeof(kreq)))
 		return -EFAULT;
-	if (kreq.request_mask != 0)
-		return -EINVAL;
 	mnt_id = kreq.mnt_id;
+	last_mnt_id = kreq.param;
 
 	down_read(&namespace_sem);
 	get_fs_root(current->fs, &root);
@@ -5067,7 +5063,10 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 			goto err;
 		orig.dentry = orig.mnt->mnt_root;
 	}
-	first = node_to_mount(rb_first(&ns->mounts));
+	if (!last_mnt_id)
+		first = node_to_mount(rb_first(&ns->mounts));
+	else
+		first = mnt_find_id_at(ns, last_mnt_id + 1);
 
 	ret = do_listmount(first, &orig, mnt_id, buf, bufsize, &root);
 err:
