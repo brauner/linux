@@ -1490,6 +1490,11 @@ void blkdev_put_no_open(struct block_device *bdev);
 struct block_device *I_BDEV(struct inode *inode);
 struct block_device *file_bdev(struct file *bdev_file);
 
+static inline struct inode *bdev_file_inode(struct file *file)
+{
+	return file->f_mapping->host;
+}
+
 #ifdef CONFIG_BLOCK
 void invalidate_bdev(struct block_device *bdev);
 int sync_blockdev(struct block_device *bdev);

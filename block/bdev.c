@@ -51,7 +51,7 @@ EXPORT_SYMBOL(I_BDEV);
 
 struct block_device *file_bdev(struct file *bdev_file)
 {
-	return I_BDEV(bdev_file->f_mapping->host);
+	return I_BDEV(bdev_file_inode(bdev_file));
 }
 EXPORT_SYMBOL(file_bdev);
 

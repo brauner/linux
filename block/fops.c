@@ -19,11 +19,6 @@
 #include <linux/module.h>
 #include "blk.h"
 
-static inline struct inode *bdev_file_inode(struct file *file)
-{
-	return file->f_mapping->host;
-}
-
 static blk_opf_t dio_bio_write_op(struct kiocb *iocb)
 {
 	blk_opf_t opf = REQ_OP_WRITE | REQ_SYNC | REQ_IDLE;
