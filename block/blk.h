@@ -9,6 +9,8 @@
 
 struct elevator_type;
 
+extern const struct file_operations def_blk_fops_restricted;
+
 /* Max future timer expiry for timeouts */
 #define BLK_MAX_TIMEOUT		(5 * HZ)
 

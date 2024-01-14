@@ -799,13 +799,16 @@ static void bdev_claim_write_access(struct block_device *bdev, blk_mode_t mode)
 		bdev->bd_writers++;
 }
 
-static void bdev_yield_write_access(struct block_device *bdev, blk_mode_t mode)
+static void bdev_yield_write_access(struct file *bdev_file, blk_mode_t mode)
 {
+	struct block_device *bdev;
+
 	if (bdev_allow_write_mounted)
 		return;
 
+	bdev = file_bdev(bdev_file);
 	/* Yield exclusive or shared write access. */
-	if (mode & BLK_OPEN_RESTRICT_WRITES)
+	if (bdev_file->f_op == &def_blk_fops_restricted)
 		bdev_unblock_writes(bdev);
 	else if (mode & BLK_OPEN_WRITE)
 		bdev->bd_writers--;
@@ -959,6 +962,7 @@ struct file *bdev_file_open_by_dev(dev_t dev, blk_mode_t mode, void *holder,
 				   const struct blk_holder_ops *hops)
 {
 	struct file *bdev_file;
+	const struct file_operations *blk_fops;
 	struct block_device *bdev;
 	unsigned int flags;
 	int ret;
@@ -972,8 +976,12 @@ struct file *bdev_file_open_by_dev(dev_t dev, blk_mode_t mode, void *holder,
 		return ERR_PTR(-ENXIO);
 
 	flags = blk_to_file_flags(mode);
+	if (mode & BLK_OPEN_RESTRICT_WRITES)
+		blk_fops = &def_blk_fops_restricted;
+	else
+		blk_fops = &def_blk_fops;
 	bdev_file = alloc_file_pseudo_noaccount(bdev->bd_inode,
-			blockdev_mnt, "", flags | O_LARGEFILE, &def_blk_fops);
+			blockdev_mnt, "", flags | O_LARGEFILE, blk_fops);
 	if (IS_ERR(bdev_file)) {
 		blkdev_put_no_open(bdev);
 		return bdev_file;
@@ -1033,7 +1041,7 @@ void bdev_release(struct file *bdev_file)
 		sync_blockdev(bdev);
 
 	mutex_lock(&disk->open_mutex);
-	bdev_yield_write_access(bdev, handle->mode);
+	bdev_yield_write_access(bdev_file, handle->mode);
 
 	if (handle->holder)
 		bd_end_claim(bdev, handle->holder);
