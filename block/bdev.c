@@ -799,7 +799,7 @@ static void bdev_claim_write_access(struct block_device *bdev, blk_mode_t mode)
 		bdev->bd_writers++;
 }
 
-static void bdev_yield_write_access(struct file *bdev_file, blk_mode_t mode)
+static void bdev_yield_write_access(struct file *bdev_file)
 {
 	struct block_device *bdev;
 
@@ -808,7 +808,7 @@ static void bdev_yield_write_access(struct file *bdev_file, blk_mode_t mode)
 
 	bdev = file_bdev(bdev_file);
 	/* Yield exclusive or shared write access. */
-	if (mode & BLK_OPEN_WRITE) {
+	if (bdev_file->f_mode & FMODE_WRITE) {
 		if (bdev_writes_blocked(bdev))
 			bdev_unblock_writes(bdev);
 		else
@@ -836,14 +836,9 @@ static void bdev_yield_write_access(struct file *bdev_file, blk_mode_t mode)
 int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
 	      const struct blk_holder_ops *hops, struct file *bdev_file)
 {
-	struct bdev_handle *handle;
 	bool unblock_events = true;
 	struct gendisk *disk = bdev->bd_disk;
 	int ret;
-
-	handle = kmalloc(sizeof(struct bdev_handle), GFP_KERNEL);
-	if (!handle)
-		return -ENOMEM;
 
 	if (holder) {
 		mode |= BLK_OPEN_EXCL;
@@ -893,8 +888,6 @@ int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
 
 	if (unblock_events)
 		disk_unblock_events(disk);
-	handle->holder = holder;
-	handle->mode = mode;
 
 	bdev_file->f_flags |= O_LARGEFILE;
 	bdev_file->f_mode |= FMODE_BUF_RASYNC | FMODE_CAN_ODIRECT;
@@ -902,7 +895,7 @@ int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
 		bdev_file->f_mode |= FMODE_NOWAIT;
 	bdev_file->f_mapping = bdev->bd_inode->i_mapping;
 	bdev_file->f_wb_err = filemap_sample_wb_err(bdev_file->f_mapping);
-	bdev_file->private_data = handle;
+	bdev_file->private_data = holder;
 
 	return 0;
 put_module:
@@ -912,7 +905,6 @@ abort_claiming:
 		bd_abort_claiming(bdev, holder);
 	mutex_unlock(&disk->open_mutex);
 	disk_unblock_events(disk);
-	kfree(handle);
 	return ret;
 }
 
@@ -976,7 +968,8 @@ struct file *bdev_file_open_by_dev(dev_t dev, blk_mode_t mode, void *holder,
 
 	ret = bdev_open(bdev, mode, holder, hops, bdev_file);
 	if (ret) {
-		blkdev_put_no_open(bdev);
+		/* We failed to open the block device. Let ->release() know. */
+		bdev_file->private_data = ERR_PTR(ret);
 		fput(bdev_file);
 		return ERR_PTR(ret);
 	}
@@ -1011,8 +1004,12 @@ EXPORT_SYMBOL(bdev_file_open_by_path);
 void bdev_release(struct file *bdev_file)
 {
 	struct block_device *bdev = file_bdev(bdev_file);
-	struct bdev_handle *handle = bdev_file->private_data;
+	void *holder = bdev_file->private_data;
 	struct gendisk *disk = bdev->bd_disk;
+
+	/* We failed to open that block device. */
+	if (IS_ERR(holder))
+		goto put_no_open;
 
 	/*
 	 * Sync early if it looks like we're the last one.  If someone else
@@ -1025,10 +1022,10 @@ void bdev_release(struct file *bdev_file)
 		sync_blockdev(bdev);
 
 	mutex_lock(&disk->open_mutex);
-	bdev_yield_write_access(bdev_file, handle->mode);
+	bdev_yield_write_access(bdev_file);
 
-	if (handle->holder)
-		bd_end_claim(bdev, handle->holder);
+	if (holder)
+		bd_end_claim(bdev, holder);
 
 	/*
 	 * Trigger event checking and tell drivers to flush MEDIA_CHANGE
@@ -1044,8 +1041,8 @@ void bdev_release(struct file *bdev_file)
 	mutex_unlock(&disk->open_mutex);
 
 	module_put(disk->fops->owner);
+put_no_open:
 	blkdev_put_no_open(bdev);
-	kfree(handle);
 }
 
 /**
