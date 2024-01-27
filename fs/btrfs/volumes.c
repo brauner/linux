@@ -490,7 +490,7 @@ btrfs_get_bdev_and_sb(const char *device_path, blk_mode_t flags, void *holder,
 		goto error;
 	}
 	invalidate_bdev(bdev);
-	*disk_super = btrfs_read_dev_super(bdev);
+	*disk_super = btrfs_read_dev_super(*bdev_file);
 	if (IS_ERR(*disk_super)) {
 		ret = PTR_ERR(*disk_super);
 		fput(*bdev_file);
@@ -1246,10 +1246,11 @@ void btrfs_release_disk_super(struct btrfs_super_block *super)
 	put_page(page);
 }
 
-static struct btrfs_super_block *btrfs_read_disk_super(struct block_device *bdev,
+static struct btrfs_super_block *btrfs_read_disk_super(struct file *bdev_file,
 						       u64 bytenr, u64 bytenr_orig)
 {
 	struct btrfs_super_block *disk_super;
+	struct block_device *bdev = file_bdev(bdev_file);
 	struct page *page;
 	void *p;
 	pgoff_t index;
@@ -1268,7 +1269,7 @@ static struct btrfs_super_block *btrfs_read_disk_super(struct block_device *bdev
 		return ERR_PTR(-EINVAL);
 
 	/* pull in the page with our super */
-	page = read_cache_page_gfp(bdev_inode(bdev)->i_mapping, index, GFP_KERNEL);
+	page = read_cache_page_gfp(bdev_file->f_mapping, index, GFP_KERNEL);
 
 	if (IS_ERR(page))
 		return ERR_CAST(page);
@@ -1344,14 +1345,13 @@ struct btrfs_device *btrfs_scan_one_device(const char *path, blk_mode_t flags,
 		return ERR_CAST(bdev_file);
 
 	bytenr_orig = btrfs_sb_offset(0);
-	ret = btrfs_sb_log_location_bdev(file_bdev(bdev_file), 0, READ, &bytenr);
+	ret = btrfs_sb_log_location_bdev(bdev_file, 0, READ, &bytenr);
 	if (ret) {
 		device = ERR_PTR(ret);
 		goto error_bdev_put;
 	}
 
-	disk_super = btrfs_read_disk_super(file_bdev(bdev_file), bytenr,
-					   bytenr_orig);
+	disk_super = btrfs_read_disk_super(bdev_file, bytenr, bytenr_orig);
 	if (IS_ERR(disk_super)) {
 		device = ERR_CAST(disk_super);
 		goto error_bdev_put;
@@ -2011,14 +2011,15 @@ static u64 btrfs_num_devices(struct btrfs_fs_info *fs_info)
 }
 
 static void btrfs_scratch_superblock(struct btrfs_fs_info *fs_info,
-				     struct block_device *bdev, int copy_num)
+				     struct file *bdev_file, int copy_num)
 {
+	struct block_device *bdev = file_bdev(bdev_file);
 	struct btrfs_super_block *disk_super;
 	const size_t len = sizeof(disk_super->magic);
 	const u64 bytenr = btrfs_sb_offset(copy_num);
 	int ret;
 
-	disk_super = btrfs_read_disk_super(bdev, bytenr, bytenr);
+	disk_super = btrfs_read_disk_super(bdev_file, bytenr, bytenr);
 	if (IS_ERR(disk_super))
 		return;
 
@@ -2033,10 +2034,11 @@ static void btrfs_scratch_superblock(struct btrfs_fs_info *fs_info,
 }
 
 void btrfs_scratch_superblocks(struct btrfs_fs_info *fs_info,
-			       struct block_device *bdev,
+			       struct file *bdev_file,
 			       const char *device_path)
 {
 	int copy_num;
+	struct block_device *bdev = file_bdev(bdev_file);
 
 	if (!bdev)
 		return;
@@ -2045,7 +2047,7 @@ void btrfs_scratch_superblocks(struct btrfs_fs_info *fs_info,
 		if (bdev_is_zoned(bdev))
 			btrfs_reset_sb_log_zones(bdev, copy_num);
 		else
-			btrfs_scratch_superblock(fs_info, bdev, copy_num);
+			btrfs_scratch_superblock(fs_info, bdev_file, copy_num);
 	}
 
 	/* Notify udev that device has changed */
@@ -2187,7 +2189,7 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info,
 	 *  just flush the device and let the caller do the final bdev_release.
 	 */
 	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state)) {
-		btrfs_scratch_superblocks(fs_info, device->bdev,
+		btrfs_scratch_superblocks(fs_info, device->bdev_file,
 					  device->name->str);
 		if (device->bdev) {
 			sync_blockdev(device->bdev);
@@ -2301,7 +2303,7 @@ void btrfs_destroy_dev_replace_tgtdev(struct btrfs_device *tgtdev)
 
 	mutex_unlock(&fs_devices->device_list_mutex);
 
-	btrfs_scratch_superblocks(tgtdev->fs_info, tgtdev->bdev,
+	btrfs_scratch_superblocks(tgtdev->fs_info, tgtdev->bdev_file,
 				  tgtdev->name->str);
 
 	btrfs_close_bdev(tgtdev);

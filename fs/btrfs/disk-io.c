@@ -3222,7 +3222,7 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 	/*
 	 * Read super block and check the signature bytes only
 	 */
-	disk_super = btrfs_read_dev_super(fs_devices->latest_dev->bdev);
+	disk_super = btrfs_read_dev_super(fs_devices->latest_dev->bdev_file);
 	if (IS_ERR(disk_super)) {
 		ret = PTR_ERR(disk_super);
 		goto fail_alloc;
@@ -3633,17 +3633,18 @@ static void btrfs_end_super_write(struct bio *bio)
 	bio_put(bio);
 }
 
-struct btrfs_super_block *btrfs_read_dev_one_super(struct block_device *bdev,
+struct btrfs_super_block *btrfs_read_dev_one_super(struct file *bdev_file,
 						   int copy_num, bool drop_cache)
 {
 	struct btrfs_super_block *super;
+	struct block_device *bdev = file_bdev(bdev_file);
 	struct page *page;
 	u64 bytenr, bytenr_orig;
-	struct address_space *mapping = bdev_inode(bdev)->i_mapping;
+	struct address_space *mapping = bdev_file->f_mapping;
 	int ret;
 
 	bytenr_orig = btrfs_sb_offset(copy_num);
-	ret = btrfs_sb_log_location_bdev(bdev, copy_num, READ, &bytenr);
+	ret = btrfs_sb_log_location_bdev(bdev_file, copy_num, READ, &bytenr);
 	if (ret == -ENOENT)
 		return ERR_PTR(-EINVAL);
 	else if (ret)
@@ -3684,7 +3685,7 @@ struct btrfs_super_block *btrfs_read_dev_one_super(struct block_device *bdev,
 }
 
 
-struct btrfs_super_block *btrfs_read_dev_super(struct block_device *bdev)
+struct btrfs_super_block *btrfs_read_dev_super(struct file *bdev_file)
 {
 	struct btrfs_super_block *super, *latest = NULL;
 	int i;
@@ -3696,7 +3697,7 @@ struct btrfs_super_block *btrfs_read_dev_super(struct block_device *bdev)
 	 * later supers, using BTRFS_SUPER_MIRROR_MAX instead
 	 */
 	for (i = 0; i < 1; i++) {
-		super = btrfs_read_dev_one_super(bdev, i, false);
+		super = btrfs_read_dev_one_super(bdev_file, i, false);
 		if (IS_ERR(super))
 			continue;
 
@@ -3726,7 +3727,7 @@ static int write_dev_supers(struct btrfs_device *device,
 			    struct btrfs_super_block *sb, int max_mirrors)
 {
 	struct btrfs_fs_info *fs_info = device->fs_info;
-	struct address_space *mapping = bdev_inode(device->bdev)->i_mapping;
+	struct address_space *mapping = device->bdev_file->f_mapping;
 	SHASH_DESC_ON_STACK(shash, fs_info->csum_shash);
 	int i;
 	int errors = 0;
@@ -3843,7 +3844,7 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 		    device->commit_total_bytes)
 			break;
 
-		page = find_get_page(bdev_inode(device->bdev)->i_mapping,
+		page = find_get_page(device->bdev_file->f_mapping,
 				     bytenr >> PAGE_SHIFT);
 		if (!page) {
 			errors++;
