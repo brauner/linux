@@ -3105,7 +3105,7 @@ enum {
 };
 
 ssize_t __blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
-			     struct block_device *bdev, struct iov_iter *iter,
+			     struct file *bdev_file, struct iov_iter *iter,
 			     get_block_t get_block,
 			     dio_iodone_t end_io,
 			     int flags);
@@ -3115,7 +3115,7 @@ static inline ssize_t blockdev_direct_IO(struct kiocb *iocb,
 					 struct iov_iter *iter,
 					 get_block_t get_block)
 {
-	return __blockdev_direct_IO(iocb, inode, inode->i_sb->s_bdev, iter,
+	return __blockdev_direct_IO(iocb, inode, inode->i_sb->s_bdev_file, iter,
 			get_block, NULL, DIO_LOCKING | DIO_SKIP_HOLES);
 }
 #endif

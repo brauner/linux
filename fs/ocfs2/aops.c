@@ -2459,7 +2459,7 @@ static ssize_t ocfs2_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 	else
 		get_block = ocfs2_dio_wr_get_block;
 
-	return __blockdev_direct_IO(iocb, inode, inode->i_sb->s_bdev,
+	return __blockdev_direct_IO(iocb, inode, inode->i_sb->s_bdev_file,
 				    iter, get_block,
 				    ocfs2_dio_end_io, 0);
 }

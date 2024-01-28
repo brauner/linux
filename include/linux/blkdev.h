@@ -212,9 +212,11 @@ struct gendisk {
 	struct blk_independent_access_ranges *ia_ranges;
 };
 
+struct inode *bdev_inode(struct block_device *bdev);
+
 static inline bool disk_live(struct gendisk *disk)
 {
-	return !inode_unhashed(disk->part0->bd_inode);
+	return !inode_unhashed(bdev_inode(disk->part0));
 }
 
 /**
@@ -1319,7 +1321,7 @@ static inline unsigned int blksize_bits(unsigned int size)
 
 static inline unsigned int block_size(struct block_device *bdev)
 {
-	return 1 << bdev->bd_inode->i_blkbits;
+	return 1 << bdev_inode(bdev)->i_blkbits;
 }
 
 int kblockd_schedule_work(struct work_struct *work);

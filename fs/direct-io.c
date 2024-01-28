@@ -671,7 +671,7 @@ static inline int dio_new_bio(struct dio *dio, struct dio_submit *sdio,
 	sector = start_sector << (sdio->blkbits - 9);
 	nr_pages = bio_max_segs(sdio->pages_in_io);
 	BUG_ON(nr_pages <= 0);
-	dio_bio_alloc(dio, sdio, map_bh->b_bdev, sector, nr_pages);
+	dio_bio_alloc(dio, sdio, bh_bdev(map_bh), sector, nr_pages);
 	sdio->boundary = 0;
 out:
 	return ret;
@@ -946,7 +946,7 @@ static int do_direct_IO(struct dio *dio, struct dio_submit *sdio,
 					map_bh->b_blocknr << sdio->blkfactor;
 				if (buffer_new(map_bh)) {
 					clean_bdev_aliases(
-						map_bh->b_bdev,
+						map_bh->b_bdev_file,
 						map_bh->b_blocknr,
 						map_bh->b_size >> i_blkbits);
 				}
@@ -1102,10 +1102,11 @@ static inline int drop_refcount(struct dio *dio)
  * for the whole file.
  */
 ssize_t __blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
-		struct block_device *bdev, struct iov_iter *iter,
+		struct file *bdev_file, struct iov_iter *iter,
 		get_block_t get_block, dio_iodone_t end_io,
 		int flags)
 {
+	struct block_device *bdev = file_bdev(bdev_file);
 	unsigned i_blkbits = READ_ONCE(inode->i_blkbits);
 	unsigned blkbits = i_blkbits;
 	unsigned blocksize_mask = (1 << blkbits) - 1;

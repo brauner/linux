@@ -227,7 +227,7 @@ static int ntfs_read_block(struct folio *folio)
 			arr[nr++] = bh;
 			continue;
 		}
-		bh->b_bdev = vol->sb->s_bdev;
+		bh->b_bdev_file = vol->sb->s_bdev_file;
 		/* Is the block within the allowed limits? */
 		if (iblock < lblock) {
 			bool is_retry = false;
@@ -678,7 +678,7 @@ static int ntfs_write_block(struct folio *folio, struct writeback_control *wbc)
 			continue;
 
 		/* Unmapped, dirty buffer. Need to map it. */
-		bh->b_bdev = vol->sb->s_bdev;
+		bh->b_bdev_file = vol->sb->s_bdev_file;
 
 		/* Convert block into corresponding vcn and offset. */
 		vcn = (VCN)block << blocksize_bits;
@@ -988,7 +988,7 @@ static int ntfs_write_mst_block(struct page *page,
 			LCN lcn;
 			unsigned int vcn_ofs;
 
-			bh->b_bdev = vol->sb->s_bdev;
+			bh->b_bdev_file = vol->sb->s_bdev_file;
 			/* Obtain the vcn and offset of the current block. */
 			vcn = (VCN)block << bh_size_bits;
 			vcn_ofs = vcn & vol->cluster_size_mask;

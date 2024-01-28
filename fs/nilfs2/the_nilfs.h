@@ -97,6 +97,7 @@ struct the_nilfs {
 	int			ns_flushed_device;
 
 	struct super_block     *ns_sb;
+	struct file            *ns_bdev_file;
 	struct block_device    *ns_bdev;
 	struct rw_semaphore	ns_sem;
 	struct mutex		ns_snapshot_mount_mutex;

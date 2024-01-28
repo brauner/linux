@@ -70,7 +70,7 @@ void erofs_init_metabuf(struct erofs_buf *buf, struct super_block *sb)
 	if (erofs_is_fscache_mode(sb))
 		buf->inode = EROFS_SB(sb)->s_fscache->inode;
 	else
-		buf->inode = sb->s_bdev->bd_inode;
+		buf->inode = bdev_file_inode(sb->s_bdev_file);
 }
 
 void *erofs_read_metabuf(struct erofs_buf *buf, struct super_block *sb,
@@ -204,6 +204,7 @@ int erofs_map_dev(struct super_block *sb, struct erofs_map_dev *map)
 	int id;
 
 	map->m_bdev = sb->s_bdev;
+	map->f_m_bdev = sb->s_bdev_file;
 	map->m_daxdev = EROFS_SB(sb)->dax_dev;
 	map->m_dax_part_off = EROFS_SB(sb)->dax_part_off;
 	map->m_fscache = EROFS_SB(sb)->s_fscache;
@@ -278,7 +279,7 @@ static int erofs_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 	if (flags & IOMAP_DAX)
 		iomap->dax_dev = mdev.m_daxdev;
 	else
-		iomap->bdev = mdev.m_bdev;
+		iomap->bdev_file = mdev.f_m_bdev;
 	iomap->length = map.m_llen;
 	iomap->flags = 0;
 	iomap->private = NULL;

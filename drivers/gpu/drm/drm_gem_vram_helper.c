@@ -935,7 +935,7 @@ static int bo_driver_move(struct ttm_buffer_object *bo,
 static int bo_driver_io_mem_reserve(struct ttm_device *bdev,
 				    struct ttm_resource *mem)
 {
-	struct drm_vram_mm *vmm = drm_vram_mm_of_bdev(bdev);
+	struct drm_vram_mm *vmm = drm_vram_mm_obdev_file(bdev);
 
 	switch (mem->mem_type) {
 	case TTM_PL_SYSTEM:	/* nothing to do */
