@@ -216,13 +216,14 @@ static const struct dentry_operations pidfs_dentry_operations = {
 	.d_prune	= stashed_dentry_prune,
 };
 
-static void pidfs_init_inode(struct inode *inode, void *data)
+static int pidfs_init_inode(struct inode *inode, void *data)
 {
 	inode->i_private = data;
 	inode->i_flags |= S_PRIVATE;
 	inode->i_mode |= S_IRWXU;
 	inode->i_op = &pidfs_inode_operations;
 	inode->i_fop = &pidfs_file_operations;
+	return pidfs_inum(data, &inode->i_ino);
 }
 
 static void pidfs_put_data(void *data)
@@ -262,14 +263,8 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 	struct file *pidfd_file;
 	struct path path;
 	int ret;
-	unsigned long ino;
 
-	ret = pidfs_inum(pid, &ino);
-	if (ret < 0)
-		return ERR_PTR(ret);
-
-	ret = path_from_stashed(&pid->stashed, ino, pidfs_mnt,
-				get_pid(pid), &path);
+	ret = path_from_stashed(&pid->stashed, pidfs_mnt, get_pid(pid), &path);
 	if (ret < 0)
 		return ERR_PTR(ret);
 
