@@ -821,13 +821,12 @@ static void bdev_yield_write_access(struct file *bdev_file)
 		return;
 
 	bdev = file_bdev(bdev_file);
-	/* Yield exclusive or shared write access. */
-	if (bdev_file->f_mode & FMODE_WRITE) {
-		if (bdev_writes_blocked(bdev))
-			bdev_unblock_writes(bdev);
-		else
-			bdev->bd_writers--;
-	}
+
+	/* O_EXCL is only set for internal BLK_OPEN_RESTRICT_WRITES. */
+	if (bdev_file->f_flags & O_EXCL)
+		bdev_unblock_writes(bdev);
+	else if (bdev_file->f_mode & FMODE_WRITE)
+		bdev->bd_writers--;
 }
 
 /**
@@ -945,6 +944,13 @@ static unsigned blk_to_file_flags(blk_mode_t mode)
 		flags |= O_RDONLY; /* homeopathic, because O_RDONLY is 0 */
 	else
 		WARN_ON_ONCE(true);
+
+	/*
+	 * BLK_OPEN_RESTRICT_WRITES is never set from userspace and
+	 * O_EXCL is stripped from userspace.
+	 */
+	if (mode & BLK_OPEN_RESTRICT_WRITES)
+		flags |= O_EXCL;
 
 	if (mode & BLK_OPEN_NDELAY)
 		flags |= O_NDELAY;
