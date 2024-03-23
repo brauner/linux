@@ -821,13 +821,14 @@ static void bdev_yield_write_access(struct file *bdev_file)
 		return;
 
 	bdev = file_bdev(bdev_file);
-	/* Yield exclusive or shared write access. */
-	if (bdev_file->f_mode & FMODE_WRITE) {
-		if (bdev_writes_blocked(bdev))
-			bdev_unblock_writes(bdev);
-		else
-			bdev->bd_writers--;
-	}
+	/*
+	 * If this was an exclusive open and writes are blocked
+	 * we know that we're the ones who blocked them.
+	 */
+	if (bdev_file->private_data && bdev_writes_blocked(bdev))
+		bdev_unblock_writes(bdev);
+	else if (bdev_file->f_mode & FMODE_WRITE)
+		bdev->bd_writers--;
 }
 
 /**
