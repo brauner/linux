@@ -583,9 +583,6 @@ static void bd_finish_claiming(struct block_device *bdev, void *holder,
 	mutex_unlock(&bdev->bd_holder_lock);
 	bd_clear_claiming(whole, holder);
 	mutex_unlock(&bdev_lock);
-
-	if (hops && hops->get_holder)
-		hops->get_holder(holder);
 }
 
 /**
@@ -608,7 +605,6 @@ EXPORT_SYMBOL(bd_abort_claiming);
 static void bd_end_claim(struct block_device *bdev, void *holder)
 {
 	struct block_device *whole = bdev_whole(bdev);
-	const struct blk_holder_ops *hops = bdev->bd_holder_ops;
 	bool unblock = false;
 
 	/*
@@ -630,9 +626,6 @@ static void bd_end_claim(struct block_device *bdev, void *holder)
 	if (!whole->bd_holders)
 		whole->bd_holder = NULL;
 	mutex_unlock(&bdev_lock);
-
-	if (hops && hops->put_holder)
-		hops->put_holder(holder);
 
 	/*
 	 * If this was the last claim, remove holder link and unblock evpoll if
@@ -1012,6 +1005,29 @@ struct file *bdev_file_open_by_path(const char *path, blk_mode_t mode,
 }
 EXPORT_SYMBOL(bdev_file_open_by_path);
 
+static inline void bd_yield_claim(struct file *bdev_file)
+{
+	struct block_device *bdev = file_bdev(bdev_file);
+	struct bdev_inode *bd_inode = BDEV_I(bdev_file->f_mapping->host);
+	void *holder = bdev_file->private_data;
+
+	lockdep_assert_held(&bdev->bd_disk->open_mutex);
+
+	if (WARN_ON_ONCE(IS_ERR_OR_NULL(holder)))
+		return;
+
+	if (holder != bd_inode) {
+		bdev_yield_write_access(bdev_file);
+		bd_end_claim(bdev, holder);
+		/*
+		 * Tell release we already gave up our hold on the
+		 * device and if write restrictions are available that
+		 * we already gave up write access to the device.
+		 */
+		bdev_file->private_data = bd_inode;
+	}
+}
+
 void bdev_release(struct file *bdev_file)
 {
 	struct block_device *bdev = file_bdev(bdev_file);
@@ -1033,10 +1049,10 @@ void bdev_release(struct file *bdev_file)
 		sync_blockdev(bdev);
 
 	mutex_lock(&disk->open_mutex);
-	bdev_yield_write_access(bdev_file);
-
 	if (holder)
-		bd_end_claim(bdev, holder);
+		bd_yield_claim(bdev_file);
+	else
+		bdev_yield_write_access(bdev_file);
 
 	/*
 	 * Trigger event checking and tell drivers to flush MEDIA_CHANGE
@@ -1054,6 +1070,31 @@ void bdev_release(struct file *bdev_file)
 	module_put(disk->fops->owner);
 put_no_open:
 	blkdev_put_no_open(bdev);
+}
+
+/**
+ * bdev_fput - yield claim to the block device and put the file
+ * @bdev_file: open block device
+ *
+ * Yield claim on the block device and put the file. Ensure that the
+ * block device can be reclaimed before the file is closed which is a
+ * deferred operation.
+ */
+void bdev_fput(struct file *bdev_file)
+{
+	if (WARN_ON_ONCE(bdev_file->f_op != &def_blk_fops))
+		return;
+
+	if (bdev_file->private_data) {
+		struct block_device *bdev = file_bdev(bdev_file);
+		struct gendisk *disk = bdev->bd_disk;
+
+		mutex_lock(&disk->open_mutex);
+		bd_yield_claim(bdev_file);
+		mutex_unlock(&disk->open_mutex);
+	}
+
+	fput(bdev_file);
 }
 
 /**
