@@ -842,8 +842,18 @@ __SYSCALL(__NR_lsm_set_self_attr, sys_lsm_set_self_attr)
 #define __NR_lsm_list_modules 461
 __SYSCALL(__NR_lsm_list_modules, sys_lsm_list_modules)
 
+/* fs/xattr.c */
+#define __NR_setxattrat 462
+__SYSCALL(__NR_setxattrat, sys_setxattrat)
+#define __NR_getxattrat 463
+__SYSCALL(__NR_getxattrat, sys_getxattrat)
+#define __NR_listxattrat 464
+__SYSCALL(__NR_listxattrat, sys_listxattrat)
+#define __NR_removexattrat 465
+__SYSCALL(__NR_removexattrat, sys_removexattrat)
+
 #undef __NR_syscalls
-#define __NR_syscalls 462
+#define __NR_syscalls 466
 
 /*
  * 32 bit systems traditionally used different
