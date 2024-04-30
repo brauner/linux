@@ -660,19 +660,27 @@ static int do_setxattrat(int dfd, const char __user *pathname, unsigned int at_f
 			 size_t size, int xattr_flags)
 {
 	struct path path;
-	int error;
+	int error = 0;
 	int lookup_flags;
 
 	if ((at_flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0)
 		return -EINVAL;
 
 	lookup_flags = (at_flags & AT_SYMLINK_NOFOLLOW) ? 0 : LOOKUP_FOLLOW;
-	if (at_flags & AT_EMPTY_PATH)
-		lookup_flags |= LOOKUP_EMPTY;
+	if (at_flags & AT_EMPTY_PATH && vfs_empty_path(dfd, pathname)) {
+		CLASS(fd, f)(dfd);
+
+		if (!f.file)
+			return -EBADF;
+
+		path = f.file->f_path;
+		path_get(&path);
+	} else {
 retry:
-	error = user_path_at(dfd, pathname, lookup_flags, &path);
-	if (error)
-		return error;
+		error = user_path_at(dfd, pathname, lookup_flags, &path);
+		if (error)
+			return error;
+	}
 	error = mnt_want_write(path.mnt);
 	if (!error) {
 		error = setxattr(mnt_idmap(path.mnt), path.dentry, name,
@@ -815,13 +823,20 @@ static ssize_t do_getxattrat(int dfd, const char __user *pathname, unsigned int 
 	if ((at_flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0)
 		return -EINVAL;
 
-	lookup_flags = (at_flags & AT_SYMLINK_NOFOLLOW) ? 0 : LOOKUP_FOLLOW;
-	if (at_flags & AT_EMPTY_PATH)
-		lookup_flags |= LOOKUP_EMPTY;
+	if (at_flags & AT_EMPTY_PATH && vfs_empty_path(dfd, pathname)) {
+		CLASS(fd, f)(dfd);
+
+		if (!f.file)
+			return -EBADF;
+
+		path = f.file->f_path;
+		path_get(&path);
+	} else {
 retry:
-	error = user_path_at(dfd, pathname, lookup_flags, &path);
-	if (error)
-		return error;
+		error = user_path_at(dfd, pathname, lookup_flags, &path);
+		if (error)
+			return error;
+	}
 	error = getxattr(mnt_idmap(path.mnt), path.dentry, name, value, size);
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
