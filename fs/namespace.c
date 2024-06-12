@@ -1834,7 +1834,8 @@ static int do_umount_root(struct super_block *sb)
 	return ret;
 }
 
-static int do_umount(struct mount *mnt, int flags)
+static int do_umount(struct mount *mnt, const struct path *root,
+		     unsigned int flags)
 {
 	struct super_block *sb = mnt->mnt.mnt_sb;
 	int retval;
@@ -1850,8 +1851,7 @@ static int do_umount(struct mount *mnt, int flags)
 	 *  (2) the usage count == 1 [parent vfsmount] + 1 [sys_umount]
 	 */
 	if (flags & MNT_EXPIRE) {
-		if (&mnt->mnt == current->fs->root.mnt ||
-		    flags & (MNT_FORCE | MNT_DETACH))
+		if (&mnt->mnt == root->mnt || flags & (MNT_FORCE | MNT_DETACH))
 			return -EINVAL;
 
 		/*
@@ -1892,7 +1892,7 @@ static int do_umount(struct mount *mnt, int flags)
 	 * /reboot - static binary that would close all descriptors and
 	 * call reboot(9). Then init(8) could umount root and exec /reboot.
 	 */
-	if (&mnt->mnt == current->fs->root.mnt && !(flags & MNT_DETACH)) {
+	if (&mnt->mnt == root->mnt && !(flags & MNT_DETACH)) {
 		/*
 		 * Special case for "unmounting" root ...
 		 * we just try to remount it readonly.
@@ -1902,7 +1902,7 @@ static int do_umount(struct mount *mnt, int flags)
 		return do_umount_root(sb);
 	}
 
-	namespace_lock();
+	guard(rwsem_write)(&namespace_sem);
 	lock_mount_hash();
 
 	/* Recheck MNT_LOCKED with the locks held */
@@ -1928,7 +1928,6 @@ static int do_umount(struct mount *mnt, int flags)
 	}
 out:
 	unlock_mount_hash();
-	namespace_unlock();
 	return retval;
 }
 
@@ -2010,7 +2009,7 @@ int path_umount(struct path *path, int flags)
 
 	ret = can_umount(path, flags);
 	if (!ret)
-		ret = do_umount(mnt, flags);
+		ret = do_umount(mnt, &current->fs->root, flags);
 
 	/* we mustn't call path_put() as that would clear mnt_expiry_mark */
 	dput(path->dentry);
@@ -5413,6 +5412,76 @@ SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 	if (copy_to_user(mnt_ids, kmnt_ids, ret * sizeof(*mnt_ids)))
 		return -EFAULT;
 
+	return ret;
+}
+
+static inline void __free_path_put_noexpire(struct path *path)
+{
+	dput(path->dentry);
+	mntput_no_expire(real_mount(path->mnt));
+}
+
+SYSCALL_DEFINE2(umount_by_id, struct mnt_id_req __user *, req, unsigned int, flags)
+{
+	struct path root __free(path_put) = {};
+	struct path orig __free(path_put_noexpire) = {};
+	struct mnt_namespace *ns __free(mnt_ns_release) = NULL;
+	struct mnt_id_req kreq;
+	struct mount *m;
+	u64 mnt_id;
+	int ret;
+
+	if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE))
+		return -EINVAL;
+
+	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	ret = copy_mnt_id_req(req, &kreq);
+	if (ret)
+		return ret;
+
+	if (kreq.param)
+		return -EINVAL;
+
+	ns = grab_requested_mnt_ns(kreq.mnt_ns_id);
+	if (!ns)
+		return -ENOENT;
+
+	/* Must be privileged over the target mount namespace. */
+	if (!ns_capable(ns->user_ns, CAP_SYS_ADMIN))
+		return -EPERM;
+
+	mnt_id = kreq.mnt_id;
+	scoped_guard(rwsem_read, &namespace_sem) {
+		ret = grab_requested_root(ns, &root);
+		if (ret)
+			return ret;
+
+		if (mnt_id == LSMT_ROOT) {
+			orig = root;
+		} else {
+			struct vfsmount *vmnt;
+
+			vmnt = lookup_mnt_in_ns(mnt_id, ns);
+			if (!vmnt)
+				return -ENOENT;
+
+			if (vmnt->mnt_flags & MNT_LOCKED)
+				return -EINVAL;
+
+			m = real_mount(vmnt);
+			if (!is_path_reachable(m, m->mnt.mnt_root, &root))
+				return -EPERM;
+
+			orig.mnt = mntget(vmnt);
+			orig.dentry = dget(orig.mnt->mnt_root);
+		}
+	}
+
+	ret = do_umount(m, &root, flags);
+	if (path_equal(&orig, &root))
+		root = (struct path){};
 	return ret;
 }
 
