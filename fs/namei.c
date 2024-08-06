@@ -3605,6 +3605,40 @@ out_dput:
 	return ERR_PTR(error);
 }
 
+static inline bool trailing_slashes(struct nameidata *nd)
+{
+	return (bool)nd->last.name[nd->last.len];
+}
+
+/*
+ * If O_CREAT was requested and lookup returns a positive dentry then the file
+ * already existed. So file creation already happened and both parent directory
+ * and created file were audited during creation. So when we we find a positive
+ * dentry there's no need to audit the parent directory again.
+ */
+static struct dentry *lookup_fast_for_open(struct nameidata *nd, int open_flag)
+{
+	struct dentry *dentry;
+
+	if ((open_flag & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
+		return NULL;
+
+	if (trailing_slashes(nd))
+		nd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
+
+	dentry = lookup_fast(nd);
+
+	if (open_flag & O_CREAT) {
+		/* Discard negative dentries. Need inode_lock to do the create */
+		if (dentry && !dentry->d_inode) {
+			if (!(nd->flags & LOOKUP_RCU))
+				dput(dentry);
+			return NULL;
+		}
+	}
+	return dentry;
+}
+
 static const char *open_last_lookups(struct nameidata *nd,
 		   struct file *file, const struct open_flags *op)
 {
@@ -3622,21 +3656,29 @@ static const char *open_last_lookups(struct nameidata *nd,
 		return handle_dots(nd, nd->last_type);
 	}
 
+	/* We _can_ be in RCU mode here */
+	dentry = lookup_fast_for_open(nd, open_flag);
+	if (IS_ERR(dentry))
+		return ERR_CAST(dentry);
+
 	if (!(open_flag & O_CREAT)) {
-		if (nd->last.name[nd->last.len])
-			nd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
-		/* we _can_ be in RCU mode here */
-		dentry = lookup_fast(nd);
-		if (IS_ERR(dentry))
-			return ERR_CAST(dentry);
 		if (likely(dentry))
 			goto finish_lookup;
 
 		if (WARN_ON_ONCE(nd->flags & LOOKUP_RCU))
 			return ERR_PTR(-ECHILD);
 	} else {
-		/* create side of things */
+		if (dentry) {
+			/* File already existed. */
+			if (trailing_slashes(nd))
+				return ERR_PTR(-EISDIR);
+			goto finish_lookup;
+		}
+
+		/* We actually do need to create it. */
 		if (nd->flags & LOOKUP_RCU) {
+			if (WARN_ON_ONCE(!(open_flag & O_EXCL)))
+				return ERR_PTR(-ECHILD);
 			if (!try_to_unlazy(nd))
 				return ERR_PTR(-ECHILD);
 		}
