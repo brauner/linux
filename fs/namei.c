@@ -3640,8 +3640,6 @@ static const char *open_last_lookups(struct nameidata *nd,
 			if (!try_to_unlazy(nd))
 				return ERR_PTR(-ECHILD);
 		}
-		audit_inode(nd->name, dir, AUDIT_INODE_PARENT);
-		/* trailing slashes? */
 		if (unlikely(nd->last.name[nd->last.len]))
 			return ERR_PTR(-EISDIR);
 	}
@@ -3673,8 +3671,13 @@ static const char *open_last_lookups(struct nameidata *nd,
 	if (got_write)
 		mnt_drop_write(nd->path.mnt);
 
-	if (IS_ERR(dentry))
+	if (IS_ERR(dentry)) {
+		audit_inode(nd->name, dir, AUDIT_INODE_PARENT);
 		return ERR_CAST(dentry);
+	}
+
+	if (file->f_mode & FMODE_CREATED)
+		audit_inode(nd->name, dir, AUDIT_INODE_PARENT);
 
 	if (file->f_mode & (FMODE_OPENED | FMODE_CREATED)) {
 		dput(nd->path.dentry);
