@@ -510,8 +510,7 @@ static void inode_unpin_lru_isolating(struct inode *inode)
 	spin_lock(&inode->i_lock);
 	WARN_ON(!(inode->i_state & I_LRU_ISOLATING));
 	inode->i_state &= ~I_LRU_ISOLATING;
-	smp_mb();
-	wake_up_bit(&inode->i_state, __I_LRU_ISOLATING);
+	inode_wake_up_bit(inode, __I_LRU_ISOLATING);
 	spin_unlock(&inode->i_lock);
 }
 
@@ -519,13 +518,22 @@ static void inode_wait_for_lru_isolating(struct inode *inode)
 {
 	lockdep_assert_held(&inode->i_lock);
 	if (inode->i_state & I_LRU_ISOLATING) {
-		DEFINE_WAIT_BIT(wq, &inode->i_state, __I_LRU_ISOLATING);
-		wait_queue_head_t *wqh;
+		struct wait_bit_queue_entry wqe;
+		struct wait_queue_head *wq_head;
 
-		wqh = bit_waitqueue(&inode->i_state, __I_LRU_ISOLATING);
-		spin_unlock(&inode->i_lock);
-		__wait_on_bit(wqh, &wq, bit_wait, TASK_UNINTERRUPTIBLE);
-		spin_lock(&inode->i_lock);
+		wq_head = inode_bit_waitqueue(&wqe, inode, __I_LRU_ISOLATING);
+		for (;;) {
+			prepare_to_wait_event(wq_head, &wqe.wq_entry,
+					      TASK_UNINTERRUPTIBLE);
+			if (inode->i_state & I_LRU_ISOLATING) {
+				spin_unlock(&inode->i_lock);
+				schedule();
+				spin_lock(&inode->i_lock);
+				continue;
+			}
+			break;
+		}
+		finish_wait(wq_head, &wqe.wq_entry);
 		WARN_ON(inode->i_state & I_LRU_ISOLATING);
 	}
 }
