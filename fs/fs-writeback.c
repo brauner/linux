@@ -1389,9 +1389,7 @@ static void inode_sync_complete(struct inode *inode)
 	inode->i_state &= ~I_SYNC;
 	/* If inode is clean an unused, put it into LRU now... */
 	inode_add_lru(inode);
-	/* Waiters must see I_SYNC cleared before being woken up */
-	smp_mb();
-	wake_up_bit(&inode->i_state, __I_SYNC);
+	inode_wake_up_bit(inode, __I_SYNC);
 }
 
 static bool inode_dirtied_after(struct inode *inode, unsigned long t)
@@ -1512,17 +1510,21 @@ static int write_inode(struct inode *inode, struct writeback_control *wbc)
  */
 void inode_wait_for_writeback(struct inode *inode)
 {
-	DEFINE_WAIT_BIT(wq, &inode->i_state, __I_SYNC);
-	wait_queue_head_t *wqh;
+	struct wait_bit_queue_entry wqe;
+	struct wait_queue_head *wq_head;
 
-	lockdep_assert_held(&inode->i_lock);
-	wqh = bit_waitqueue(&inode->i_state, __I_SYNC);
-	while (inode->i_state & I_SYNC) {
-		spin_unlock(&inode->i_lock);
-		__wait_on_bit(wqh, &wq, bit_wait,
-			      TASK_UNINTERRUPTIBLE);
-		spin_lock(&inode->i_lock);
+	wq_head = inode_bit_waitqueue(&wqe, inode, __I_SYNC);
+	for (;;) {
+		prepare_to_wait_event(wq_head, &wqe.wq_entry, TASK_UNINTERRUPTIBLE);
+		if (inode->i_state & I_SYNC) {
+			spin_unlock(&inode->i_lock);
+			schedule();
+			spin_lock(&inode->i_lock);
+			continue;
+		}
+		break;
 	}
+	finish_wait(wq_head, &wqe.wq_entry);
 }
 
 /*
@@ -1533,16 +1535,17 @@ void inode_wait_for_writeback(struct inode *inode)
 static void inode_sleep_on_writeback(struct inode *inode)
 	__releases(inode->i_lock)
 {
-	DEFINE_WAIT(wait);
-	wait_queue_head_t *wqh = bit_waitqueue(&inode->i_state, __I_SYNC);
-	int sleep;
+	struct wait_bit_queue_entry wqe;
+	struct wait_queue_head *wq_head;
+	bool sleep;
 
-	prepare_to_wait(wqh, &wait, TASK_UNINTERRUPTIBLE);
-	sleep = inode->i_state & I_SYNC;
+	wq_head = inode_bit_waitqueue(&wqe, inode, __I_SYNC);
+	prepare_to_wait_event(wq_head, &wqe.wq_entry, TASK_UNINTERRUPTIBLE);
+	sleep = !!(inode->i_state & I_SYNC);
 	spin_unlock(&inode->i_lock);
 	if (sleep)
 		schedule();
-	finish_wait(wqh, &wait);
+	finish_wait(wq_head, &wqe.wq_entry);
 }
 
 /*
