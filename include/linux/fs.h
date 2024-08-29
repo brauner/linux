@@ -1003,7 +1003,6 @@ static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
  * @f_pos_lock: lock protecting file position
  * @f_pipe: specific to pipes
  * @f_pos: file position
- * @f_version: file version
  * @f_security: LSM security context of this file
  * @f_owner: file owner
  * @f_wb_err: writeback error
@@ -1034,7 +1033,6 @@ struct file {
 		u64			f_pipe;
 	};
 	loff_t				f_pos;
-	u64				f_version;
 	/* --- cacheline 2 boundary (128 bytes) --- */
 #ifdef CONFIG_SECURITY
 	void				*f_security;
