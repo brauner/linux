@@ -384,15 +384,19 @@ static inline loff_t ext4_get_htree_eof(struct file *filp)
 static loff_t ext4_dir_llseek(struct file *file, loff_t offset, int whence)
 {
 	struct inode *inode = file->f_mapping->host;
+	struct dir_private_info *info = file->private_data;
 	int dx_dir = is_dx_dir(inode);
 	loff_t ret, htree_max = ext4_get_htree_eof(file);
 
-	if (likely(dx_dir))
+	if (likely(dx_dir)) {
 		ret = generic_file_llseek_size(file, offset, whence,
 						    htree_max, htree_max);
-	else
+		info->version = inode_peek_iversion(inode) - 1;
+
+	} else {
 		ret = ext4_llseek(file, offset, whence);
-	file->f_version = inode_peek_iversion(inode) - 1;
+		file->f_version = inode_peek_iversion(inode) - 1;
+	}
 	return ret;
 }
 
@@ -429,18 +433,15 @@ static void free_rb_tree_fname(struct rb_root *root)
 	*root = RB_ROOT;
 }
 
-
-static struct dir_private_info *ext4_htree_create_dir_info(struct file *filp,
-							   loff_t pos)
+static void ext4_htree_init_dir_info(struct file *filp, loff_t pos)
 {
-	struct dir_private_info *p;
+	struct dir_private_info *p = filp->private_data;
 
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
-	if (!p)
-		return NULL;
-	p->curr_hash = pos2maj_hash(filp, pos);
-	p->curr_minor_hash = pos2min_hash(filp, pos);
-	return p;
+	if (!p->initialized) {
+		p->curr_hash = pos2maj_hash(filp, pos);
+		p->curr_minor_hash = pos2min_hash(filp, pos);
+		p->initialized = true;
+	}
 }
 
 void ext4_htree_free_dir_info(struct dir_private_info *p)
@@ -552,12 +553,7 @@ static int ext4_dx_readdir(struct file *file, struct dir_context *ctx)
 	struct fname *fname;
 	int ret = 0;
 
-	if (!info) {
-		info = ext4_htree_create_dir_info(file, ctx->pos);
-		if (!info)
-			return -ENOMEM;
-		file->private_data = info;
-	}
+	ext4_htree_init_dir_info(file, ctx->pos);
 
 	if (ctx->pos == ext4_get_htree_eof(file))
 		return 0;	/* EOF */
@@ -590,10 +586,10 @@ static int ext4_dx_readdir(struct file *file, struct dir_context *ctx)
 		 * cached entries.
 		 */
 		if ((!info->curr_node) ||
-		    !inode_eq_iversion(inode, file->f_version)) {
+		    !inode_eq_iversion(inode, info->version)) {
 			info->curr_node = NULL;
 			free_rb_tree_fname(&info->root);
-			file->f_version = inode_query_iversion(inode);
+			info->version = inode_query_iversion(inode);
 			ret = ext4_htree_fill_tree(file, info->curr_hash,
 						   info->curr_minor_hash,
 						   &info->next_hash);
@@ -664,7 +660,22 @@ int ext4_check_all_de(struct inode *dir, struct buffer_head *bh, void *buf,
 	return 0;
 }
 
+static int ext4_dir_open(struct inode *inode, struct file *file)
+{
+	struct dir_private_info *info;
+
+	if (!is_dx_dir(inode))
+		return 0;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+	file->private_data = info;
+	return 0;
+}
+
 const struct file_operations ext4_dir_operations = {
+	.open		= ext4_dir_open,
 	.llseek		= ext4_dir_llseek,
 	.read		= generic_read_dir,
 	.iterate_shared	= ext4_readdir,
