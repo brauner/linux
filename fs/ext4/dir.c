@@ -229,7 +229,7 @@ static int ext4_readdir(struct file *file, struct dir_context *ctx)
 		 * readdir(2), then we might be pointing to an invalid
 		 * dirent right now.  Scan from the start of the block
 		 * to make sure. */
-		if (!inode_eq_iversion(inode, file->f_version)) {
+		if (!inode_eq_iversion(inode, (u64)(uintptr_t)file->private_data)) {
 			for (i = 0; i < sb->s_blocksize && i < offset; ) {
 				de = (struct ext4_dir_entry_2 *)
 					(bh->b_data + i);
@@ -249,7 +249,7 @@ static int ext4_readdir(struct file *file, struct dir_context *ctx)
 			offset = i;
 			ctx->pos = (ctx->pos & ~(sb->s_blocksize - 1))
 				| offset;
-			file->f_version = inode_query_iversion(inode);
+			file->private_data = (void *)(uintptr_t)inode_query_iversion(inode);
 		}
 
 		while (ctx->pos < inode->i_size
@@ -395,7 +395,7 @@ static loff_t ext4_dir_llseek(struct file *file, loff_t offset, int whence)
 
 	} else {
 		ret = ext4_llseek(file, offset, whence);
-		file->f_version = inode_peek_iversion(inode) - 1;
+		file->private_data = (void *)(uintptr_t)(inode_peek_iversion(inode) - 1);
 	}
 	return ret;
 }

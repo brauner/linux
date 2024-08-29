@@ -1508,7 +1508,7 @@ int ext4_read_inline_dir(struct file *file,
 	 * dirent right now.  Scan from the start of the inline
 	 * dir to make sure.
 	 */
-	if (!inode_eq_iversion(inode, file->f_version)) {
+	if (!inode_eq_iversion(inode, (u64)(uintptr_t)file->private_data)) {
 		for (i = 0; i < extra_size && i < offset;) {
 			/*
 			 * "." is with offset 0 and
@@ -1540,7 +1540,7 @@ int ext4_read_inline_dir(struct file *file,
 		}
 		offset = i;
 		ctx->pos = offset;
-		file->f_version = inode_query_iversion(inode);
+		file->private_data = (void *)(uintptr_t)inode_query_iversion(inode);
 	}
 
 	while (ctx->pos < extra_size) {
