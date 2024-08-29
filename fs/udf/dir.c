@@ -60,7 +60,7 @@ static int udf_readdir(struct file *file, struct dir_context *ctx)
 	 * identifying beginning of dir entry (names are under user control),
 	 * we need to scan the directory from the beginning.
 	 */
-	if (!inode_eq_iversion(dir, file->f_version)) {
+	if (!inode_eq_iversion(dir, (u64)(uintptr_t)file->private_data)) {
 		emit_pos = nf_pos;
 		nf_pos = 0;
 	} else {
@@ -122,15 +122,21 @@ out_iter:
 	udf_fiiter_release(&iter);
 out:
 	if (pos_valid)
-		file->f_version = inode_query_iversion(dir);
+		file->private_data = (void *)(uintptr_t)inode_query_iversion(dir);
 	kfree(fname);
 
 	return ret;
 }
 
+static loff_t udf_dir_llseek(struct file *file, loff_t offset, int whence)
+{
+	return generic_versioned_llseek(file, offset, whence,
+					(u64 *)(uintptr_t)&file->private_data);
+}
+
 /* readdir and lookup functions */
 const struct file_operations udf_dir_operations = {
-	.llseek			= generic_file_llseek,
+	.llseek			= udf_dir_llseek,
 	.read			= generic_read_dir,
 	.iterate_shared		= udf_readdir,
 	.unlocked_ioctl		= udf_ioctl,
