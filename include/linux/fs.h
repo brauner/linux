@@ -3202,6 +3202,12 @@ extern loff_t vfs_setpos(struct file *file, loff_t offset, loff_t maxsize);
 extern loff_t generic_file_llseek(struct file *file, loff_t offset, int whence);
 extern loff_t generic_file_llseek_size(struct file *file, loff_t offset,
 		int whence, loff_t maxsize, loff_t eof);
+loff_t generic_versioned_llseek_size(struct file *file, loff_t offset,
+				     int whence, loff_t maxsize, loff_t eof,
+				     u64 *seek_version);
+loff_t generic_versioned_llseek(struct file *file, loff_t offset,
+				     int whence,
+				     u64 *seek_version);
 extern loff_t fixed_size_llseek(struct file *file, loff_t offset,
 		int whence, loff_t size);
 extern loff_t no_seek_end_llseek_size(struct file *, loff_t, int, loff_t);
