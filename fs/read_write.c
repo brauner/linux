@@ -132,6 +132,98 @@ generic_file_llseek_size(struct file *file, loff_t offset, int whence,
 EXPORT_SYMBOL(generic_file_llseek_size);
 
 /**
+ * generic_versioned_llseek - versioned llseek implementation
+ * @file:	file structure to seek on
+ * @offset:	file offset to seek to
+ * @whence:	type of seek
+ * @seek_version: version number to update
+ *
+ * See generic_file_llseek for a general description and locking assumptions.
+ *
+ * In contrast to generic_file_llseek, this function also resets a version
+ * counter the filesystem provides.
+ */
+loff_t generic_versioned_llseek_size(struct file *file, loff_t offset,
+				     int whence, loff_t maxsize, loff_t eof,
+				     u64 *seek_version)
+{
+	bool must_lock = false;
+
+	if (WARN_ON_ONCE(!seek_version))
+		return -EINVAL;
+
+	switch (whence) {
+	case SEEK_END:
+		offset += eof;
+		break;
+	case SEEK_CUR:
+		/*
+		 * Here we special-case the lseek(fd, 0, SEEK_CUR)
+		 * position-querying operation.  Avoid rewriting the "same"
+		 * f_pos value back to the file because a concurrent read(),
+		 * write() or lseek() might have altered it
+		 */
+		if (offset == 0)
+			return file->f_pos;
+		/*
+		 * f_lock protects against read/modify/write race with other
+		 * SEEK_CURs. Note that parallel writes and reads behave
+		 * like SEEK_SET.
+		 */
+		must_lock = true;
+		break;
+	case SEEK_DATA:
+		/*
+		 * In the generic case the entire file is data, so as long as
+		 * offset isn't at the end of the file then the offset is data.
+		 */
+		if ((unsigned long long)offset >= eof)
+			return -ENXIO;
+		break;
+	case SEEK_HOLE:
+		/*
+		 * There is a virtual hole at the end of the file, so as long as
+		 * offset isn't i_size or larger, return i_size.
+		 */
+		if ((unsigned long long)offset >= eof)
+			return -ENXIO;
+		offset = eof;
+		break;
+	}
+
+	if (must_lock)
+		spin_lock(&file->f_lock);
+
+	if (offset < 0 && !unsigned_offsets(file))
+		return -EINVAL;
+	if (offset > maxsize)
+		return -EINVAL;
+
+	if (offset != file->f_pos) {
+		file->f_pos = offset;
+		*seek_version = 0;
+	}
+
+	if (must_lock)
+		spin_unlock(&file->f_lock);
+
+	return offset;
+}
+EXPORT_SYMBOL(generic_versioned_llseek_size);
+
+loff_t generic_versioned_llseek(struct file *file, loff_t offset,
+				     int whence,
+				     u64 *seek_version)
+{
+	struct inode *inode = file->f_mapping->host;
+
+	return generic_versioned_llseek_size(file, offset, whence,
+					     inode->i_sb->s_maxbytes,
+					     i_size_read(inode), seek_version);
+}
+EXPORT_SYMBOL(generic_versioned_llseek);
+
+/**
  * generic_file_llseek - generic llseek implementation for regular files
  * @file:	file structure to seek on
  * @offset:	file offset to seek to
