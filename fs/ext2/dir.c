@@ -263,7 +263,8 @@ ext2_readdir(struct file *file, struct dir_context *ctx)
 	unsigned long n = pos >> PAGE_SHIFT;
 	unsigned long npages = dir_pages(inode);
 	unsigned chunk_mask = ~(ext2_chunk_size(inode)-1);
-	bool need_revalidate = !inode_eq_iversion(inode, file->f_version);
+	u64 version = (u64)(uintptr_t)file->private_data;
+	bool need_revalidate = !inode_eq_iversion(inode, version);
 	bool has_filetype;
 
 	if (pos > inode->i_size - EXT2_DIR_REC_LEN(1))
@@ -290,7 +291,7 @@ ext2_readdir(struct file *file, struct dir_context *ctx)
 				offset = ext2_validate_entry(kaddr, offset, chunk_mask);
 				ctx->pos = (n<<PAGE_SHIFT) + offset;
 			}
-			file->f_version = inode_query_iversion(inode);
+			file->private_data = (void *)(uintptr_t)inode_query_iversion(inode);
 			need_revalidate = false;
 		}
 		de = (ext2_dirent *)(kaddr+offset);
@@ -703,8 +704,14 @@ not_empty:
 	return 0;
 }
 
+static loff_t ext2_dir_llseek(struct file *file, loff_t offset, int whence)
+{
+	return generic_versioned_llseek(file, offset, whence,
+					(u64 *)(uintptr_t)&file->private_data);
+}
+
 const struct file_operations ext2_dir_operations = {
-	.llseek		= generic_file_llseek,
+	.llseek		= ext2_dir_llseek,
 	.read		= generic_read_dir,
 	.iterate_shared	= ext2_readdir,
 	.unlocked_ioctl = ext2_ioctl,
