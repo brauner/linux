@@ -2,6 +2,10 @@
 #ifndef _LINUX_FILE_REF_H
 #define _LINUX_FILE_REF_H
 
+#include <linux/atomic.h>
+#include <linux/preempt.h>
+#include <linux/types.h>
+
 #ifdef CONFIG_64BIT
 #define FILE_REF_ONEREF		0x0000000000000000UL
 #define FILE_REF_MAXREF		0x7FFFFFFFFFFFFFFFUL
@@ -37,7 +41,7 @@ static inline void file_ref_init(file_ref_t *ref, unsigned long cnt)
 }
 
 bool __file_ref_get(file_ref_t *ref);
-bool __file_ref_put(file_ref_t *ref);
+bool __file_ref_put(file_ref_t *ref, unsigned long cnt);
 
 /**
  * file_ref_get - Acquire one reference on a file
@@ -82,21 +86,19 @@ static __always_inline __must_check bool file_ref_get(file_ref_t *ref)
  */
 static __always_inline __must_check bool file_ref_put(file_ref_t *ref)
 {
-	bool released;
+	long cnt;
 
-	preempt_disable();
+	guard(preempt)();
 	/*
 	 * Unconditionally decrease the reference count. The saturation
 	 * and dead zones provide enough tolerance for this. If this
 	 * fails then we need to handle the last reference drop and
 	 * cases inside the saturation and dead zones.
 	 */
-	if (likely(!atomic_long_add_negative_release(-1, &ref->refcnt)))
-		released = false;
-	else
-		released = __file_ref_put(ref);
-	preempt_enable();
-	return released;
+	cnt = atomic_long_dec_return(&ref->refcnt);
+	if (cnt >= 0)
+		return false;
+	return __file_ref_put(ref, cnt);
 }
 
 /**
