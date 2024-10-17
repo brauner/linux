@@ -40,7 +40,6 @@ static inline void file_ref_init(file_ref_t *ref, unsigned long cnt)
 	atomic_long_set(&ref->refcnt, cnt - 1);
 }
 
-bool __file_ref_get(file_ref_t *ref);
 bool __file_ref_put(file_ref_t *ref, unsigned long cnt);
 
 /**
@@ -62,11 +61,7 @@ static __always_inline __must_check bool file_ref_get(file_ref_t *ref)
 	 * ordering. The saturation and dead zones provide enough
 	 * tolerance for this.
 	 */
-	if (likely(!atomic_long_add_negative(1, &ref->refcnt)))
-		return true;
-
-	/* Handle the cases inside the saturation and dead zones */
-	return __file_ref_get(ref);
+	return !atomic_long_add_negative(1, &ref->refcnt);
 }
 
 /**
