@@ -65,6 +65,19 @@ static __always_inline __must_check bool file_ref_get(file_ref_t *ref)
 }
 
 /**
+ * file_ref_get - Acquire one reference on a file
+ * @ref: Pointer to the reference count
+ *
+ * Acquire an additional reference on a file. Warns if the caller didn't
+ * already hold a reference.
+ */
+static __always_inline void file_ref_inc(file_ref_t *ref)
+{
+	long prior = atomic_long_fetch_inc_relaxed(&ref->refcnt);
+	WARN_ONCE(prior < 0, "file_ref_inc() on a released file reference");
+}
+
+/**
  * file_ref_put -- Release a file reference
  * @ref:	Pointer to the reference count
  *

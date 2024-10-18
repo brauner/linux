@@ -1079,8 +1079,7 @@ struct file_handle {
 
 static inline struct file *get_file(struct file *f)
 {
-	WARN_ONCE(!file_ref_get(&f->f_ref),
-		  "struct file::f_ref incremented from zero; use-after-free condition present!\n");
+	file_ref_inc(&f->f_ref);
 	return f;
 }
 
