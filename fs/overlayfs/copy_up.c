@@ -741,17 +741,15 @@ static int ovl_prep_cu_creds(struct dentry *dentry, struct ovl_cu_creds *cc)
 		return err;
 
 	if (cc->new)
-		cc->old = override_creds(get_new_cred(cc->new));
+		cc->old = override_creds(cc->new);
 
 	return 0;
 }
 
 static void ovl_revert_cu_creds(struct ovl_cu_creds *cc)
 {
-	if (cc->new) {
+	if (cc->new)
 		put_cred(revert_creds(cc->old));
-		put_cred(cc->new);
-	}
 }
 
 /*
