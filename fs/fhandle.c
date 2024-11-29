@@ -282,13 +282,13 @@ static int do_handle_to_path(struct file_handle *handle, struct path *path,
  * filesystem but that only applies to procfs and sysfs neither of which
  * support decoding file handles.
  */
-static inline bool may_decode_fh(struct handle_to_path_ctx *ctx,
+static inline int may_decode_fh(struct handle_to_path_ctx *ctx,
 				 unsigned int o_flags)
 {
 	struct path *root = &ctx->root;
 
 	if (capable(CAP_DAC_READ_SEARCH))
-		return true;
+		return 0;
 
 	/*
 	 * Restrict to O_DIRECTORY to provide a deterministic API that avoids a
@@ -297,7 +297,7 @@ static inline bool may_decode_fh(struct handle_to_path_ctx *ctx,
 	 * There's only one dentry for each directory inode (VFS rule)...
 	 */
 	if (!(o_flags & O_DIRECTORY))
-		return false;
+		return -EPERM;
 
 	if (ns_capable(root->mnt->mnt_sb->s_user_ns, CAP_SYS_ADMIN))
 		ctx->flags = HANDLE_CHECK_PERMS;
@@ -307,14 +307,14 @@ static inline bool may_decode_fh(struct handle_to_path_ctx *ctx,
 		 !has_locked_children(real_mount(root->mnt), root->dentry))
 		ctx->flags = HANDLE_CHECK_PERMS | HANDLE_CHECK_SUBTREE;
 	else
-		return false;
+		return -EPERM;
 
 	/* Are we able to override DAC permissions? */
 	if (!ns_capable(current_user_ns(), CAP_DAC_READ_SEARCH))
-		return false;
+		return -EPERM;
 
 	ctx->fh_flags = EXPORT_FH_DIR_ONLY;
-	return true;
+	return 0;
 }
 
 static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
@@ -329,10 +329,9 @@ static int handle_to_path(int mountdirfd, struct file_handle __user *ufh,
 	if (retval)
 		goto out_err;
 
-	if (!may_decode_fh(&ctx, o_flags)) {
-		retval = -EPERM;
+	retval = may_decode_fh(&ctx, o_flags);
+	if (retval)
 		goto out_path;
-	}
 
 	if (copy_from_user(&f_handle, ufh, sizeof(struct file_handle))) {
 		retval = -EFAULT;
