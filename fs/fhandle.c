@@ -187,17 +187,6 @@ static int get_path_from_fd(int fd, struct path *root)
 	return 0;
 }
 
-enum handle_to_path_flags {
-	HANDLE_CHECK_PERMS   = (1 << 0),
-	HANDLE_CHECK_SUBTREE = (1 << 1),
-};
-
-struct handle_to_path_ctx {
-	struct path root;
-	enum handle_to_path_flags flags;
-	unsigned int fh_flags;
-};
-
 static int vfs_dentry_acceptable(void *context, struct dentry *dentry)
 {
 	struct handle_to_path_ctx *ctx = context;
