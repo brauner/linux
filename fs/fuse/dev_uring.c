@@ -737,9 +737,7 @@ static void fuse_uring_add_req_to_ring_ent(struct fuse_ring_ent *ent,
 			ent->state);
 	}
 
-	spin_lock(&fiq->lock);
 	clear_bit(FR_PENDING, &req->flags);
-	spin_unlock(&fiq->lock);
 	ent->fuse_req = req;
 	ent->state = FRRS_FUSE_REQ;
 	list_move(&ent->list, &queue->ent_w_req_queue);
