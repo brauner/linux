@@ -287,7 +287,6 @@ static bool pidfs_ioctl_valid(unsigned int cmd)
 	switch (cmd) {
 	case FS_IOC_GETVERSION:
 	case PIDFD_GET_CGROUP_NAMESPACE:
-	case PIDFD_GET_INFO:
 	case PIDFD_GET_IPC_NAMESPACE:
 	case PIDFD_GET_MNT_NAMESPACE:
 	case PIDFD_GET_NET_NAMESPACE:
@@ -297,6 +296,11 @@ static bool pidfs_ioctl_valid(unsigned int cmd)
 	case PIDFD_GET_UTS_NAMESPACE:
 	case PIDFD_GET_USER_NAMESPACE:
 	case PIDFD_GET_PID_NAMESPACE:
+		return true;
+	}
+
+	switch (_IOC_NR(cmd)) {
+	case _IOC_NR(PIDFD_GET_INFO):
 		return true;
 	}
 
