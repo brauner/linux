@@ -299,9 +299,15 @@ static bool pidfs_ioctl_valid(unsigned int cmd)
 		return true;
 	}
 
+	/* Extensible ioctls require some more careful checks. */
 	switch (_IOC_NR(cmd)) {
 	case _IOC_NR(PIDFD_GET_INFO):
-		return true;
+		/*
+		 * Try to prevent performing a pidfd ioctl when someone
+		 * erronously mistook the file descriptor for a pidfd.
+		 * This is not perfect but will catch most cases.
+		 */
+		return (_IOC_TYPE(cmd) == _IOC_TYPE(PIDFD_GET_INFO));
 	}
 
 	return false;
