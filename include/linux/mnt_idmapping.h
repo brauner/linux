@@ -212,42 +212,7 @@ static inline kgid_t vfsgid_into_kgid(vfsgid_t vfsgid)
 	return AS_KGIDT(vfsgid);
 }
 
-/**
- * mapped_fsuid - return caller's fsuid mapped according to an idmapping
- * @idmap: the mount's idmapping
- * @fs_userns: the filesystem's idmapping
- *
- * Use this helper to initialize a new vfs or filesystem object based on
- * the caller's fsuid. A common example is initializing the i_uid field of
- * a newly allocated inode triggered by a creation event such as mkdir or
- * O_CREAT. Other examples include the allocation of quotas for a specific
- * user.
- *
- * Return: the caller's current fsuid mapped up according to @idmap.
- */
-static inline kuid_t mapped_fsuid(struct mnt_idmap *idmap,
-				  struct user_namespace *fs_userns)
-{
-	return from_vfsuid(idmap, fs_userns, VFSUIDT_INIT(current_fsuid()));
-}
-
-/**
- * mapped_fsgid - return caller's fsgid mapped according to an idmapping
- * @idmap: the mount's idmapping
- * @fs_userns: the filesystem's idmapping
- *
- * Use this helper to initialize a new vfs or filesystem object based on
- * the caller's fsgid. A common example is initializing the i_gid field of
- * a newly allocated inode triggered by a creation event such as mkdir or
- * O_CREAT. Other examples include the allocation of quotas for a specific
- * user.
- *
- * Return: the caller's current fsgid mapped up according to @idmap.
- */
-static inline kgid_t mapped_fsgid(struct mnt_idmap *idmap,
-				  struct user_namespace *fs_userns)
-{
-	return from_vfsgid(idmap, fs_userns, VFSGIDT_INIT(current_fsgid()));
-}
+kuid_t mapped_fsuid(struct mnt_idmap *idmap, struct user_namespace *fs_userns);
+kgid_t mapped_fsgid(struct mnt_idmap *idmap, struct user_namespace *fs_userns);
 
 #endif /* _LINUX_MNT_IDMAPPING_H */

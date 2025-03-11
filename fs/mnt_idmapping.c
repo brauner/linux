@@ -18,6 +18,8 @@
 #define VFSGIDT_INIT_RAW(val) (vfsgid_t){ val }
 
 struct mnt_idmap {
+	vfsuid_t vfsuid_squash;
+	vfsgid_t vfsgid_squash;
 	struct uid_gid_map uid_map;
 	struct uid_gid_map gid_map;
 	refcount_t count;
@@ -29,7 +31,9 @@ struct mnt_idmap {
  * mapped to {g,u}id 1, [...], {g,u}id 1000 to {g,u}id 1000, [...].
  */
 struct mnt_idmap nop_mnt_idmap = {
-	.count	= REFCOUNT_INIT(1),
+	.count		= REFCOUNT_INIT(1),
+	.vfsuid_squash	= { -1 },
+	.vfsgid_squash	= { -1 },
 };
 EXPORT_SYMBOL_GPL(nop_mnt_idmap);
 
@@ -38,7 +42,9 @@ EXPORT_SYMBOL_GPL(nop_mnt_idmap);
  * This means that all {g,u}ids are mapped to INVALID_VFS{G,U}ID.
  */
 struct mnt_idmap invalid_mnt_idmap = {
-	.count	= REFCOUNT_INIT(1),
+	.count		= REFCOUNT_INIT(1),
+	.vfsuid_squash	= { -1 },
+	.vfsgid_squash	= { -1 },
 };
 EXPORT_SYMBOL_GPL(invalid_mnt_idmap);
 
@@ -93,6 +99,8 @@ vfsuid_t make_vfsuid(struct mnt_idmap *idmap,
 		uid = from_kuid(fs_userns, kuid);
 	if (uid == (uid_t)-1)
 		return INVALID_VFSUID;
+	if (vfsuid_valid(idmap->vfsuid_squash))
+		return idmap->vfsuid_squash;
 	return VFSUIDT_INIT_RAW(map_id_down(&idmap->uid_map, uid));
 }
 EXPORT_SYMBOL_GPL(make_vfsuid);
@@ -132,6 +140,8 @@ vfsgid_t make_vfsgid(struct mnt_idmap *idmap,
 		gid = from_kgid(fs_userns, kgid);
 	if (gid == (gid_t)-1)
 		return INVALID_VFSGID;
+	if (vfsgid_valid(idmap->vfsgid_squash))
+		return idmap->vfsgid_squash;
 	return VFSGIDT_INIT_RAW(map_id_down(&idmap->gid_map, gid));
 }
 EXPORT_SYMBOL_GPL(make_vfsgid);
@@ -156,9 +166,15 @@ kuid_t from_vfsuid(struct mnt_idmap *idmap,
 		return AS_KUIDT(vfsuid);
 	if (idmap == &invalid_mnt_idmap)
 		return INVALID_UID;
-	uid = map_id_up(&idmap->uid_map, __vfsuid_val(vfsuid));
-	if (uid == (uid_t)-1)
-		return INVALID_UID;
+	if (vfsuid_valid(idmap->vfsuid_squash)) {
+		if (!vfsuid_eq(idmap->vfsuid_squash, vfsuid))
+			return INVALID_UID;
+		uid = __vfsuid_val(vfsuid);
+	} else {
+		uid = map_id_up(&idmap->uid_map, __vfsuid_val(vfsuid));
+		if (uid == (uid_t)-1)
+			return INVALID_UID;
+	}
 	if (initial_idmapping(fs_userns))
 		return KUIDT_INIT(uid);
 	return make_kuid(fs_userns, uid);
@@ -185,14 +201,78 @@ kgid_t from_vfsgid(struct mnt_idmap *idmap,
 		return AS_KGIDT(vfsgid);
 	if (idmap == &invalid_mnt_idmap)
 		return INVALID_GID;
-	gid = map_id_up(&idmap->gid_map, __vfsgid_val(vfsgid));
-	if (gid == (gid_t)-1)
-		return INVALID_GID;
+	if (vfsgid_valid(idmap->vfsgid_squash)) {
+		if (!vfsgid_eq(idmap->vfsgid_squash, vfsgid))
+			return INVALID_GID;
+		gid = __vfsgid_val(vfsgid);
+	} else {
+		gid = map_id_up(&idmap->gid_map, __vfsgid_val(vfsgid));
+		if (gid == (gid_t)-1)
+			return INVALID_GID;
+	}
 	if (initial_idmapping(fs_userns))
 		return KGIDT_INIT(gid);
 	return make_kgid(fs_userns, gid);
 }
 EXPORT_SYMBOL_GPL(from_vfsgid);
+
+/**
+ * mapped_fsuid - return caller's fsuid mapped according to an idmapping
+ * @idmap: the mount's idmapping
+ * @fs_userns: the filesystem's idmapping
+ *
+ * Use this helper to initialize a new vfs or filesystem object based on
+ * the caller's fsuid. A common example is initializing the i_uid field of
+ * a newly allocated inode triggered by a creation event such as mkdir or
+ * O_CREAT. Other examples include the allocation of quotas for a specific
+ * user.
+ *
+ * Return: the caller's current fsuid mapped up according to @idmap.
+ */
+kuid_t mapped_fsuid(struct mnt_idmap *idmap, struct user_namespace *fs_userns)
+{
+	vfsuid_t vfsuid;
+
+	if (vfsuid_valid(idmap->vfsuid_squash))
+		vfsuid = idmap->vfsuid_squash;
+	else
+		vfsuid = VFSUIDT_INIT(current_fsuid());
+	if (vfsuid_valid(idmap->vfsuid_squash) && !vfsuid_eq(idmap->vfsuid_squash, VFSUIDT_INIT(current_fsuid())))
+		pr_err("mapped_fsuid: %u : %u\n", __vfsuid_val(idmap->vfsuid_squash), __kuid_val(current_fsuid()));
+	return from_vfsuid(idmap, fs_userns, vfsuid);
+}
+EXPORT_SYMBOL_GPL(mapped_fsuid);
+
+/**
+ * mapped_fsgid - return caller's fsgid mapped according to an idmapping
+ * @idmap: the mount's idmapping
+ * @fs_userns: the filesystem's idmapping
+ *
+ * Use this helper to initialize a new vfs or filesystem object based on
+ * the caller's fsgid. A common example is initializing the i_gid field of
+ * a newly allocated inode triggered by a creation event such as mkdir or
+ * O_CREAT. Other examples include the allocation of quotas for a specific
+ * user.
+ *
+ * Return: the caller's current fsgid mapped up according to @idmap.
+ */
+kgid_t mapped_fsgid(struct mnt_idmap *idmap, struct user_namespace *fs_userns)
+{
+	vfsgid_t vfsgid;
+
+	/*
+	 * A privileged process may write to a squashing idmapping using
+	 * the squashed {g,u}id.
+	 */
+	if (vfsgid_valid(idmap->vfsgid_squash))
+		vfsgid = idmap->vfsgid_squash;
+	else
+		vfsgid = VFSGIDT_INIT(current_fsgid());
+	if (vfsgid_valid(idmap->vfsgid_squash) && !vfsgid_eq(idmap->vfsgid_squash, VFSGIDT_INIT(current_fsgid())))
+		pr_err("mapped_fsuid: %u : %u\n", __vfsgid_val(idmap->vfsgid_squash), __kgid_val(current_fsgid()));
+	return from_vfsgid(idmap, fs_userns, vfsgid);
+}
+EXPORT_SYMBOL_GPL(mapped_fsgid);
 
 #ifdef CONFIG_MULTIUSER
 /**
@@ -301,6 +381,22 @@ struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns)
 		free_mnt_idmap(idmap);
 		idmap = ERR_PTR(ret);
 	}
+	idmap->vfsuid_squash = INVALID_VFSUID;
+	idmap->vfsgid_squash = INVALID_VFSGID;
+	return idmap;
+}
+
+struct mnt_idmap *alloc_mnt_idmap_squash(kuid_t kuid_squash, kgid_t kgid_squash)
+{
+	struct mnt_idmap *idmap;
+
+	idmap = kzalloc(sizeof(struct mnt_idmap), GFP_KERNEL_ACCOUNT);
+	if (!idmap)
+		return ERR_PTR(-ENOMEM);
+
+	refcount_set(&idmap->count, 1);
+	idmap->vfsuid_squash = VFSUIDT_INIT(kuid_squash);
+	idmap->vfsgid_squash = VFSGIDT_INIT(kgid_squash);
 	return idmap;
 }
 

@@ -90,6 +90,7 @@ static LIST_HEAD(mnt_ns_list); /* protected by mnt_ns_tree_lock */
 enum mount_kattr_flags_t {
 	MOUNT_KATTR_RECURSE		= (1 << 0),
 	MOUNT_KATTR_IDMAP_REPLACE	= (1 << 1),
+	MOUNT_KATTR_IDMAP_SQUASH	= (1 << 2),
 };
 
 struct mount_kattr {
@@ -100,6 +101,8 @@ struct mount_kattr {
 	enum mount_kattr_flags_t kflags;
 	struct user_namespace *mnt_userns;
 	struct mnt_idmap *mnt_idmap;
+	kuid_t kuid_squash;
+	kgid_t kgid_squash;
 };
 
 /* /sys/fs */
@@ -4223,7 +4226,8 @@ out_type:
 	 MOUNT_ATTR_NOEXEC | MOUNT_ATTR__ATIME | MOUNT_ATTR_NODIRATIME |       \
 	 MOUNT_ATTR_NOSYMFOLLOW)
 
-#define MOUNT_SETATTR_VALID_FLAGS (FSMOUNT_VALID_FLAGS | MOUNT_ATTR_IDMAP)
+#define MOUNT_SETATTR_VALID_FLAGS \
+	(FSMOUNT_VALID_FLAGS | MOUNT_ATTR_IDMAP | MOUNT_ATTR_IDMAP_SQUASH)
 
 #define MOUNT_SETATTR_PROPAGATION_FLAGS \
 	(MS_UNBINDABLE | MS_PRIVATE | MS_SLAVE | MS_SHARED)
@@ -4744,19 +4748,20 @@ static void mount_setattr_commit(struct mount_kattr *kattr, struct mount *mnt)
 static int do_mount_setattr(struct path *path, struct mount_kattr *kattr)
 {
 	struct mount *mnt = real_mount(path->mnt);
+	struct mnt_idmap *mnt_idmap = NULL;
 	int err = 0;
 
 	if (!path_mounted(path))
 		return -EINVAL;
 
-	if (kattr->mnt_userns) {
-		struct mnt_idmap *mnt_idmap;
-
+	if (kattr->mnt_userns)
 		mnt_idmap = alloc_mnt_idmap(kattr->mnt_userns);
-		if (IS_ERR(mnt_idmap))
-			return PTR_ERR(mnt_idmap);
+	else if (kattr->kflags & MOUNT_KATTR_IDMAP_SQUASH)
+		mnt_idmap = alloc_mnt_idmap_squash(kattr->kuid_squash, kattr->kgid_squash);
+	if (IS_ERR(mnt_idmap))
+		return PTR_ERR(mnt_idmap);
+	if (mnt_idmap != NULL)
 		kattr->mnt_idmap = mnt_idmap;
-	}
 
 	if (kattr->propagation) {
 		/*
@@ -4821,10 +4826,10 @@ static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
 	struct ns_common *ns;
 	struct user_namespace *mnt_userns;
 
-	if (!((attr->attr_set | attr->attr_clr) & MOUNT_ATTR_IDMAP))
+	if (!((attr->attr_set | attr->attr_clr) & (MOUNT_ATTR_IDMAP | MOUNT_ATTR_IDMAP_SQUASH)))
 		return 0;
 
-	if (attr->attr_clr & MOUNT_ATTR_IDMAP) {
+	if (attr->attr_clr & (MOUNT_ATTR_IDMAP | MOUNT_ATTR_IDMAP_SQUASH)) {
 		/*
 		 * We can only remove an idmapping if it's never been
 		 * exposed to userspace.
@@ -4836,10 +4841,27 @@ static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
 		 * Removal of idmappings is equivalent to setting
 		 * nop_mnt_idmap.
 		 */
-		if (!(attr->attr_set & MOUNT_ATTR_IDMAP)) {
+		if (!(attr->attr_set & (MOUNT_ATTR_IDMAP | MOUNT_ATTR_IDMAP_SQUASH))) {
 			kattr->mnt_idmap = &nop_mnt_idmap;
 			return 0;
 		}
+	}
+
+	if (attr->attr_set & MOUNT_ATTR_IDMAP_SQUASH) {
+		if (attr->uid_squash >= ((uid_t)-1))
+			return -EINVAL;
+		if (attr->gid_squash >= ((gid_t)-1))
+			return -EINVAL;
+
+		kattr->kuid_squash = make_kuid(current_user_ns(), attr->uid_squash);
+		if (!uid_valid(kattr->kuid_squash))
+			return -EINVAL;
+		kattr->kgid_squash = make_kgid(current_user_ns(), attr->gid_squash);
+		if (!gid_valid(kattr->kgid_squash))
+			return -EINVAL;
+
+		kattr->kflags |= MOUNT_KATTR_IDMAP_SQUASH;
+		return 0;
 	}
 
 	if (attr->userns_fd > INT_MAX)
@@ -4946,7 +4968,7 @@ static int copy_mount_setattr(struct mount_attr __user *uattr, size_t usize,
 	int ret;
 	struct mount_attr attr;
 
-	BUILD_BUG_ON(sizeof(struct mount_attr) != MOUNT_ATTR_SIZE_VER0);
+	BUILD_BUG_ON(sizeof(struct mount_attr) != MOUNT_ATTR_SIZE_VER1);
 
 	if (unlikely(usize > PAGE_SIZE))
 		return -E2BIG;

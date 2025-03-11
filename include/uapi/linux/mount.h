@@ -124,6 +124,7 @@ enum fsconfig_command {
 #define MOUNT_ATTR_NODIRATIME	0x00000080 /* Do not update directory access times */
 #define MOUNT_ATTR_IDMAP	0x00100000 /* Idmap mount to @userns_fd in struct mount_attr. */
 #define MOUNT_ATTR_NOSYMFOLLOW	0x00200000 /* Do not follow symlinks */
+#define MOUNT_ATTR_IDMAP_SQUASH	0x00400000 /* Squash all {g,u}ids down to @{g,u}id_squash */
 
 /*
  * mount_setattr()
@@ -132,11 +133,18 @@ struct mount_attr {
 	__u64 attr_set;
 	__u64 attr_clr;
 	__u64 propagation;
-	__u64 userns_fd;
+	union {
+		__u64 userns_fd;
+		struct {
+			__u64 uid_squash;
+			__u64 gid_squash;
+		};
+	};
 };
 
 /* List of all mount_attr versions. */
 #define MOUNT_ATTR_SIZE_VER0	32 /* sizeof first published struct */
+#define MOUNT_ATTR_SIZE_VER1	40 /* sizeof second published struct */
 
 
 /*

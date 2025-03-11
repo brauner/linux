@@ -316,6 +316,7 @@ ssize_t __kernel_write_iter(struct file *file, struct iov_iter *from, loff_t *po
  * fs/attr.c
  */
 struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns);
+struct mnt_idmap *alloc_mnt_idmap_squash(kuid_t kuid_squash, kgid_t kgid_squash);
 struct mnt_idmap *mnt_idmap_get(struct mnt_idmap *idmap);
 void mnt_idmap_put(struct mnt_idmap *idmap);
 struct stashed_operations {
