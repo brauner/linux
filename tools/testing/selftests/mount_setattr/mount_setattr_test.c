@@ -134,6 +134,10 @@
 #define MOUNT_ATTR_NOSYMFOLLOW 0x00200000
 #endif
 
+#ifndef MOUNT_ATTR_IDMAP_SQUASH
+#define MOUNT_ATTR_IDMAP_SQUASH 0x00400000
+#endif
+
 static inline int sys_mount_setattr(int dfd, const char *path, unsigned int flags,
 				    struct mount_attr *attr, size_t size)
 {
@@ -1504,6 +1508,103 @@ TEST_F(mount_setattr, mount_attr_nosymfollow)
 	fd = open(NOSYMFOLLOW_SYMLINK, O_RDWR | O_CLOEXEC);
 	ASSERT_GT(fd, 0);
 	ASSERT_EQ(close(fd), 0);
+}
+
+struct tmp_mount_attr {
+        __u64 attr_set;
+        __u64 attr_clr;
+        __u64 propagation;
+        union {
+                __u64 userns_fd;
+                struct {
+                        __u64 uid_squash;
+                        __u64 gid_squash;
+                };
+        };
+};
+
+TEST_F(mount_setattr_idmapped, mount_idmap_squash)
+{
+	int open_tree_fd = -EBADF, fd = -EBADF;
+	struct stat st;
+	struct tmp_mount_attr attr = {
+		.attr_set = MOUNT_ATTR_IDMAP_SQUASH,
+		.uid_squash = 1234,
+		.gid_squash = 1234,
+	};
+
+	fd = open("/mnt/C/file0", O_RDWR | O_CLOEXEC | O_CREAT | O_EXCL, 0777);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ(fchown(fd, 0, 0), 0);
+	EXPECT_EQ(close(fd), 0);
+
+	fd = open("/mnt/C/file1", O_RDWR | O_CLOEXEC | O_CREAT | O_EXCL, 0777);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ(fchown(fd, 1, 1), 0);
+	EXPECT_EQ(close(fd), 0);
+
+	fd = open("/mnt/C/file1000", O_RDWR | O_CLOEXEC | O_CREAT | O_EXCL, 0777);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ(fchown(fd, 1000, 1000), 0);
+	EXPECT_EQ(close(fd), 0);
+
+	open_tree_fd = sys_open_tree(-EBADF, "/mnt/C",
+				     AT_EMPTY_PATH |
+				     AT_NO_AUTOMOUNT |
+				     AT_SYMLINK_NOFOLLOW |
+				     OPEN_TREE_CLOEXEC |
+				     OPEN_TREE_CLONE);
+	ASSERT_GE(open_tree_fd, 0);
+
+	ASSERT_EQ(sys_mount_setattr(open_tree_fd, "",
+				    AT_EMPTY_PATH,
+				    (struct mount_attr *)&attr,
+				    sizeof(attr)), 0);
+
+	ASSERT_EQ(fstatat(open_tree_fd, "file0", &st, 0), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	ASSERT_EQ(fstatat(open_tree_fd, "file1", &st, 0), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	ASSERT_EQ(fstatat(open_tree_fd, "file1000", &st, 0), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	ASSERT_NE(fchownat(open_tree_fd, "file0", 5000, 5000, 0), 0);
+	ASSERT_NE(fchownat(open_tree_fd, "file1", 5000, 5000, 0), 0);
+	ASSERT_NE(fchownat(open_tree_fd, "file1000", 5000, 5000, 0), 0);
+
+	ASSERT_EQ(fchownat(open_tree_fd, "file0", 1234, 1234, 0), 0);
+	ASSERT_EQ(fchownat(open_tree_fd, "file1", 1234, 1234, 0), 0);
+	ASSERT_EQ(fchownat(open_tree_fd, "file1000", 1234, 1234, 0), 0);
+
+	ASSERT_EQ(fstatat(open_tree_fd, "file0", &st, 0), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	ASSERT_EQ(fstatat(open_tree_fd, "file1", &st, 0), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	ASSERT_EQ(fstatat(open_tree_fd, "file1000", &st, 0), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	fd = openat(open_tree_fd, "file1234", O_RDWR | O_CLOEXEC | O_CREAT | O_EXCL, 0777);
+	EXPECT_EQ(close(fd), 0);
+
+	ASSERT_EQ(fstatat(open_tree_fd, "file1234", &st, 0), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	ASSERT_EQ(stat("/mnt/C/file1234", &st), 0);
+	ASSERT_EQ(st.st_uid, 1234);
+	ASSERT_EQ(st.st_gid, 1234);
+
+	EXPECT_EQ(close(open_tree_fd), 0);
 }
 
 TEST_HARNESS_MAIN
