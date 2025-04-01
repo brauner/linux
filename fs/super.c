@@ -1191,6 +1191,8 @@ static const void *filesystems_freeze_ptr;
 
 static void filesystems_freeze_callback(struct super_block *sb, void *unused)
 {
+	int err;
+
 	if (!sb->s_op->freeze_fs && !sb->s_op->freeze_super)
 		return;
 
@@ -1198,11 +1200,15 @@ static void filesystems_freeze_callback(struct super_block *sb, void *unused)
 		return;
 
 	if (sb->s_op->freeze_super)
-		sb->s_op->freeze_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
+		err = sb->s_op->freeze_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
 				       filesystems_freeze_ptr);
 	else
-		freeze_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
+		err = freeze_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
 			     filesystems_freeze_ptr);
+	if (err)
+		pr_err("failed to FREEZE filesystem during hibernation\n");
+	else
+		pr_err("succeeded to FREEZE filesystem during hibernation\n");
 
 	deactivate_super(sb);
 }
@@ -1215,6 +1221,8 @@ void filesystems_freeze(void)
 
 static void filesystems_thaw_callback(struct super_block *sb, void *unused)
 {
+	int err;
+
 	if (!sb->s_op->freeze_fs && !sb->s_op->freeze_super)
 		return;
 
@@ -1222,11 +1230,15 @@ static void filesystems_thaw_callback(struct super_block *sb, void *unused)
 		return;
 
 	if (sb->s_op->thaw_super)
-		sb->s_op->thaw_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
+		err = sb->s_op->thaw_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
 				     filesystems_freeze_ptr);
 	else
-		thaw_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
+		err = thaw_super(sb, FREEZE_EXCL | FREEZE_HOLDER_KERNEL,
 			   filesystems_freeze_ptr);
+	if (err)
+		pr_err("failed to THAW filesystem during hibernation\n");
+	else
+		pr_err("succeeded to THAW filesystem during hibernation\n");
 
 	deactivate_super(sb);
 }
