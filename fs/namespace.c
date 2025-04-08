@@ -5065,7 +5065,7 @@ out:
 }
 
 static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
-				struct mount_kattr *kattr)
+				struct mount_kattr *kattr, unsigned int flags)
 {
 	struct ns_common *ns;
 	struct user_namespace *mnt_userns;
@@ -5126,8 +5126,24 @@ static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
 }
 
 static int build_mount_kattr(const struct mount_attr *attr, size_t usize,
-			     struct mount_kattr *kattr)
+			     struct mount_kattr *kattr, unsigned int flags)
 {
+	unsigned int lookup_flags = LOOKUP_AUTOMOUNT | LOOKUP_FOLLOW;
+
+	if (flags & AT_NO_AUTOMOUNT)
+		lookup_flags &= ~LOOKUP_AUTOMOUNT;
+	if (flags & AT_SYMLINK_NOFOLLOW)
+		lookup_flags &= ~LOOKUP_FOLLOW;
+	if (flags & AT_EMPTY_PATH)
+		lookup_flags |= LOOKUP_EMPTY;
+
+	*kattr = (struct mount_kattr) {
+		.lookup_flags	= lookup_flags,
+	};
+
+	if (flags & AT_RECURSIVE)
+		kattr->kflags |= MOUNT_KATTR_RECURSE;
+
 	if (attr->propagation & ~MOUNT_SETATTR_PROPAGATION_FLAGS)
 		return -EINVAL;
 	if (hweight32(attr->propagation & MOUNT_SETATTR_PROPAGATION_FLAGS) > 1)
@@ -5175,7 +5191,7 @@ static int build_mount_kattr(const struct mount_attr *attr, size_t usize,
 			return -EINVAL;
 	}
 
-	return build_mount_idmapped(attr, usize, kattr);
+	return build_mount_idmapped(attr, usize, kattr, flags);
 }
 
 static void finish_mount_kattr(struct mount_kattr *kattr)
@@ -5189,13 +5205,22 @@ static void finish_mount_kattr(struct mount_kattr *kattr)
 		mnt_idmap_put(kattr->mnt_idmap);
 }
 
-static int copy_mount_setattr(struct mount_attr __user *uattr, size_t usize,
-			      struct mount_kattr *kattr)
+SYSCALL_DEFINE5(mount_setattr, int, dfd, const char __user *, path,
+		unsigned int, flags, struct mount_attr __user *, uattr,
+		size_t, usize)
 {
-	int ret;
+	int err;
+	struct path target;
 	struct mount_attr attr;
+	struct mount_kattr kattr;
 
 	BUILD_BUG_ON(sizeof(struct mount_attr) != MOUNT_ATTR_SIZE_VER0);
+
+	if (flags & ~(AT_EMPTY_PATH |
+		      AT_RECURSIVE |
+		      AT_SYMLINK_NOFOLLOW |
+		      AT_NO_AUTOMOUNT))
+		return -EINVAL;
 
 	if (unlikely(usize > PAGE_SIZE))
 		return -E2BIG;
@@ -5205,9 +5230,9 @@ static int copy_mount_setattr(struct mount_attr __user *uattr, size_t usize,
 	if (!may_mount())
 		return -EPERM;
 
-	ret = copy_struct_from_user(&attr, sizeof(attr), uattr, usize);
-	if (ret)
-		return ret;
+	err = copy_struct_from_user(&attr, sizeof(attr), uattr, usize);
+	if (err)
+		return err;
 
 	/* Don't bother walking through the mounts if this is a nop. */
 	if (attr.attr_set == 0 &&
@@ -5215,39 +5240,7 @@ static int copy_mount_setattr(struct mount_attr __user *uattr, size_t usize,
 	    attr.propagation == 0)
 		return 0;
 
-	return build_mount_kattr(&attr, usize, kattr);
-}
-
-SYSCALL_DEFINE5(mount_setattr, int, dfd, const char __user *, path,
-		unsigned int, flags, struct mount_attr __user *, uattr,
-		size_t, usize)
-{
-	int err;
-	struct path target;
-	struct mount_kattr kattr;
-	unsigned int lookup_flags = LOOKUP_AUTOMOUNT | LOOKUP_FOLLOW;
-
-	if (flags & ~(AT_EMPTY_PATH |
-		      AT_RECURSIVE |
-		      AT_SYMLINK_NOFOLLOW |
-		      AT_NO_AUTOMOUNT))
-		return -EINVAL;
-
-	if (flags & AT_NO_AUTOMOUNT)
-		lookup_flags &= ~LOOKUP_AUTOMOUNT;
-	if (flags & AT_SYMLINK_NOFOLLOW)
-		lookup_flags &= ~LOOKUP_FOLLOW;
-	if (flags & AT_EMPTY_PATH)
-		lookup_flags |= LOOKUP_EMPTY;
-
-	kattr = (struct mount_kattr) {
-		.lookup_flags	= lookup_flags,
-	};
-
-	if (flags & AT_RECURSIVE)
-		kattr.kflags |= MOUNT_KATTR_RECURSE;
-
-	err = copy_mount_setattr(uattr, usize, &kattr);
+	err = build_mount_kattr(&attr, usize, &kattr, flags);
 	if (err)
 		return err;
 
@@ -5276,13 +5269,16 @@ SYSCALL_DEFINE5(open_tree_attr, int, dfd, const char __user *, filename,
 
 	if (uattr) {
 		int ret;
+		struct mount_attr attr;
 		struct mount_kattr kattr = {};
 
 		kattr.kflags = MOUNT_KATTR_IDMAP_REPLACE;
-		if (flags & AT_RECURSIVE)
-			kattr.kflags |= MOUNT_KATTR_RECURSE;
 
-		ret = copy_mount_setattr(uattr, usize, &kattr);
+		ret = copy_struct_from_user(&attr, sizeof(attr), uattr, usize);
+		if (ret)
+			return ret;
+
+		ret = build_mount_kattr(&attr, usize, &kattr, flags);
 		if (ret)
 			return ret;
 
