@@ -2108,27 +2108,22 @@ static int __pidfd_prepare(struct pid *pid, unsigned int flags, struct file **re
  */
 int pidfd_prepare(struct pid *pid, unsigned int flags, struct file **ret)
 {
-	int err = 0;
-
-	if (!(flags & PIDFD_THREAD)) {
+	scoped_guard(spinlock_irq, &pid->wait_pidfd.lock) {
 		/*
-		 * If this is struct pid isn't used as a thread-group
-		 * leader pid but the caller requested to create a
-		 * thread-group leader pidfd then report ENOENT to the
-		 * caller as a hint.
+		 * If this wasn't a thread-group leader struct pid or
+		 * the task already been reaped report ESRCH to
+		 * userspace.
 		 */
-		if (!pid_has_task(pid, PIDTYPE_TGID))
-			err = -ENOENT;
+		if (!pid_has_task(pid, PIDTYPE_PID))
+			return -ESRCH;
+		/*
+		 * If this struct pid isn't used as a thread-group
+		 * leader but the caller requested to create a
+		 * thread-group leader pidfd then report ENOENT.
+		 */
+		if (!(flags & PIDFD_THREAD) && !pid_has_task(pid, PIDTYPE_TGID))
+			return -ENOENT;
 	}
-
-	/*
-	 * If this wasn't a thread-group leader struct pid or the task
-	 * got reaped in the meantime report -ESRCH to userspace.
-	 */
-	if (!pid_has_task(pid, PIDTYPE_PID))
-		err = -ESRCH;
-	if (err)
-		return err;
 
 	return __pidfd_prepare(pid, flags, ret);
 }
