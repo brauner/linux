@@ -21,6 +21,7 @@
 #include <linux/utsname.h>
 #include <net/net_namespace.h>
 #include <linux/coredump.h>
+#include <linux/xattr.h>
 
 #include "internal.h"
 #include "mount.h"
@@ -40,6 +41,7 @@
 #define PIDFS_PID_DEAD ERR_PTR(-ESRCH)
 
 static struct kmem_cache *pidfs_cachep __ro_after_init;
+static struct kmem_cache *pidfs_attrs_cachep __ro_after_init;
 
 /*
  * Stashes information that userspace needs to access even after the
@@ -51,9 +53,14 @@ struct pidfs_exit_info {
 	__u32 coredump_mask;
 };
 
+struct pidfs_attrs {
+	struct simple_xattrs xattrs;
+};
+
 struct pidfs_inode {
 	struct pidfs_exit_info __pei;
 	struct pidfs_exit_info *exit_info;
+	struct pidfs_attrs *attrs;
 	struct inode vfs_inode;
 };
 
@@ -672,15 +679,34 @@ static int pidfs_getattr(struct mnt_idmap *idmap, const struct path *path,
 	return anon_inode_getattr(idmap, path, stat, request_mask, query_flags);
 }
 
+static ssize_t pidfs_listxattr(struct dentry *dentry, char *buf, size_t size)
+{
+	struct inode *inode = d_inode(dentry);
+	struct pidfs_attrs *attrs;
+
+	attrs = READ_ONCE(pidfs_i(inode)->attrs);
+	if (!attrs)
+		return -ENODATA;
+
+	return simple_xattr_list(inode, &attrs->xattrs, buf, size);
+}
+
 static const struct inode_operations pidfs_inode_operations = {
-	.getattr = pidfs_getattr,
-	.setattr = pidfs_setattr,
+	.getattr	= pidfs_getattr,
+	.setattr	= pidfs_setattr,
+	.listxattr	= pidfs_listxattr,
 };
 
 static void pidfs_evict_inode(struct inode *inode)
 {
 	struct pid *pid = inode->i_private;
+	struct pidfs_attrs *attrs;
 
+	attrs = READ_ONCE(pidfs_i(inode)->attrs);
+	if (attrs) {
+		simple_xattrs_free(&attrs->xattrs, NULL);
+		kmem_cache_free(pidfs_attrs_cachep, attrs);
+	}
 	clear_inode(inode);
 	put_pid(pid);
 }
@@ -695,6 +721,7 @@ static struct inode *pidfs_alloc_inode(struct super_block *sb)
 
 	memset(&pi->__pei, 0, sizeof(pi->__pei));
 	pi->exit_info = NULL;
+	pi->attrs = NULL;
 
 	return &pi->vfs_inode;
 }
@@ -951,6 +978,63 @@ static const struct stashed_operations pidfs_stashed_ops = {
 	.put_data	= pidfs_put_data,
 };
 
+static int pidfs_xattr_get(const struct xattr_handler *handler,
+			   struct dentry *unused, struct inode *inode,
+			   const char *suffix, void *value, size_t size)
+{
+	const char *name;
+	struct pidfs_attrs *attrs;
+
+	attrs = READ_ONCE(pidfs_i(inode)->attrs);
+	if (!attrs)
+		return -ENODATA;
+
+	name = xattr_full_name(handler, suffix);
+	return simple_xattr_get(&attrs->xattrs, name, value, size);
+}
+
+static int pidfs_xattr_set(const struct xattr_handler *handler,
+			   struct mnt_idmap *idmap, struct dentry *unused,
+			   struct inode *inode, const char *suffix,
+			   const void *value, size_t size, int flags)
+{
+	const char *name;
+	struct pidfs_attrs *attrs;
+	struct simple_xattr *old_xattr;
+
+	/* Make sure we're the only one here. */
+	WARN_ON_ONCE(!inode_is_locked(inode));
+
+	attrs = READ_ONCE(pidfs_i(inode)->attrs);
+	if (!attrs) {
+		attrs = kmem_cache_zalloc(pidfs_attrs_cachep, GFP_KERNEL);
+		if (!attrs)
+			return -ENOMEM;
+
+		simple_xattrs_init(&attrs->xattrs);
+		smp_store_release(&pidfs_i(inode)->attrs, attrs);
+	}
+
+	name = xattr_full_name(handler, suffix);
+	old_xattr = simple_xattr_set(&attrs->xattrs, name, value, size, flags);
+	if (IS_ERR(old_xattr))
+		return PTR_ERR(old_xattr);
+
+	simple_xattr_free(old_xattr);
+	return 0;
+}
+
+static const struct xattr_handler pidfs_trusted_xattr_handler = {
+	.prefix = XATTR_TRUSTED_PREFIX,
+	.get	= pidfs_xattr_get,
+	.set	= pidfs_xattr_set,
+};
+
+static const struct xattr_handler *const pidfs_xattr_handlers[] = {
+	&pidfs_trusted_xattr_handler,
+	NULL
+};
+
 static int pidfs_init_fs_context(struct fs_context *fc)
 {
 	struct pseudo_fs_context *ctx;
@@ -964,6 +1048,7 @@ static int pidfs_init_fs_context(struct fs_context *fc)
 	ctx->ops = &pidfs_sops;
 	ctx->eops = &pidfs_export_operations;
 	ctx->dops = &pidfs_dentry_operations;
+	ctx->xattr = pidfs_xattr_handlers;
 	fc->s_fs_info = (void *)&pidfs_stashed_ops;
 	return 0;
 }
@@ -1073,6 +1158,11 @@ void __init pidfs_init(void)
 					 (SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
 					  SLAB_ACCOUNT | SLAB_PANIC),
 					 pidfs_inode_init_once);
+
+	pidfs_attrs_cachep = kmem_cache_create("pidfs_attrs_cache",
+					       sizeof(struct pidfs_attrs), 0,
+					       SLAB_PANIC, NULL);
+
 	pidfs_mnt = kern_mount(&pidfs_type);
 	if (IS_ERR(pidfs_mnt))
 		panic("Failed to mount pidfs pseudo filesystem");
