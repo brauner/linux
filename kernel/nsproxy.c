@@ -263,7 +263,7 @@ int exec_task_namespaces(void)
 	return 0;
 }
 
-static int check_setns_flags(unsigned long flags)
+static int check_setns_flags(unsigned int flags)
 {
 	if (!flags || (flags & ~(CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
 				 CLONE_NEWNET | CLONE_NEWTIME | CLONE_NEWUSER |
@@ -318,7 +318,7 @@ static void put_nsset(struct nsset *nsset)
 		free_nsproxy(nsset->nsproxy);
 }
 
-static int prepare_nsset(unsigned flags, struct nsset *nsset)
+static int prepare_nsset(unsigned int flags, struct nsset *nsset)
 {
 	struct task_struct *me = current;
 
