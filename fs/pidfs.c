@@ -739,7 +739,7 @@ static int pidfs_encode_fh(struct inode *inode, u32 *fh, int *max_len,
 
 	*max_len = 2;
 	*(u64 *)fh = pid->ino;
-	return FILEID_KERNFS;
+	return FILEID_PIDFS;
 }
 
 static int pidfs_ino_find(const void *key, const struct rb_node *node)
@@ -794,7 +794,7 @@ static struct dentry *pidfs_fh_to_dentry(struct super_block *sb,
 		return NULL;
 
 	switch (fh_type) {
-	case FILEID_KERNFS:
+	case FILEID_PIDFS:
 		pid_ino = *(u64 *)fid;
 		break;
 	default:
