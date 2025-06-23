@@ -44,16 +44,44 @@ void pidfs_get_root(struct path *path)
  * process has been reaped.
  */
 struct pidfs_exit_info {
-	__u64 cgroupid;
-	__s32 exit_code;
-	__u32 coredump_mask;
 };
 
 struct pidfs_attr {
 	struct simple_xattrs *xattrs;
-	struct pidfs_exit_info __pei;
-	struct pidfs_exit_info *exit_info;
+	seqcount_spinlock_t exit_seq;
+	struct /* exit_info */ {
+		__u64 cgroupid;
+		__s32 exit_code;
+		__u32 coredump_mask;
+		unsigned int seq;
+	};
 };
+
+static void pidfs_read_exit_info(struct pidfs_attr *attr, __u64 mask,
+				 struct pidfd_info *kinfo)
+{
+	unsigned int seq;
+
+	do {
+		seq = read_seqcount_begin(&attr->exit_seq);
+		if (mask & PIDFD_INFO_EXIT) {
+			/* TODO: add way to detect that task did actually exit */
+			kinfo->exit_code = attr->exit_code;
+#ifdef CONFIG_CGROUPS
+			kinfo->cgroupid = attr->cgroupid;
+#endif
+		}
+		if (mask & PIDFD_INFO_COREDUMP)
+			kinfo->coredump_mask = attr->coredump_mask;
+	} while (read_seqcount_retry(&attr->exit_seq, seq));
+
+	if (attr->seq != seq) {
+		kinfo->mask |= PIDFD_INFO_EXIT;
+#ifdef CONFIG_CGROUPS
+		kinfo->mask |= PIDFD_INFO_CGROUPID;
+#endif
+	}
+}
 
 static struct rb_root pidfs_ino_tree = RB_ROOT;
 
@@ -297,7 +325,6 @@ static long pidfd_info(struct file *file, unsigned int cmd, unsigned long arg)
 	struct pid *pid = pidfd_pid(file);
 	size_t usize = _IOC_SIZE(cmd);
 	struct pidfd_info kinfo = {};
-	struct pidfs_exit_info *exit_info;
 	struct user_namespace *user_ns;
 	struct task_struct *task;
 	struct pidfs_attr *attr;
@@ -320,21 +347,11 @@ static long pidfd_info(struct file *file, unsigned int cmd, unsigned long arg)
 		return -ESRCH;
 
 	attr = READ_ONCE(pid->attr);
-	if (mask & PIDFD_INFO_EXIT) {
-		exit_info = READ_ONCE(attr->exit_info);
-		if (exit_info) {
-			kinfo.mask |= PIDFD_INFO_EXIT;
-#ifdef CONFIG_CGROUPS
-			kinfo.cgroupid = exit_info->cgroupid;
-			kinfo.mask |= PIDFD_INFO_CGROUPID;
-#endif
-			kinfo.exit_code = exit_info->exit_code;
-		}
-	}
+	pidfs_read_exit_info(attr, mask, &kinfo);
 
 	if (mask & PIDFD_INFO_COREDUMP) {
 		kinfo.mask |= PIDFD_INFO_COREDUMP;
-		kinfo.coredump_mask = READ_ONCE(attr->__pei.coredump_mask);
+		kinfo.coredump_mask = READ_ONCE(attr->coredump_mask);
 	}
 
 	task = get_pid_task(pid, PIDTYPE_PID);
@@ -601,7 +618,6 @@ void pidfs_exit(struct task_struct *tsk)
 {
 	struct pid *pid = task_pid(tsk);
 	struct pidfs_attr *attr;
-	struct pidfs_exit_info *exit_info;
 #ifdef CONFIG_CGROUPS
 	struct cgroup *cgrp;
 #endif
@@ -629,26 +645,22 @@ void pidfs_exit(struct task_struct *tsk)
 	 * is put
 	 */
 
-	exit_info = &attr->__pei;
-
+	write_seqcount_begin(&pid->attr->exit_seq);
 #ifdef CONFIG_CGROUPS
 	rcu_read_lock();
 	cgrp = task_dfl_cgroup(tsk);
-	exit_info->cgroupid = cgroup_id(cgrp);
+	attr->cgroupid = cgroup_id(cgrp);
 	rcu_read_unlock();
 #endif
-	exit_info->exit_code = tsk->exit_code;
-
-	/* Ensure that PIDFD_GET_INFO sees either all or nothing. */
-	smp_store_release(&attr->exit_info, &attr->__pei);
+	attr->exit_code = tsk->exit_code;
+	write_seqcount_end(&pid->attr->exit_seq);
 }
 
 #ifdef CONFIG_COREDUMP
 void pidfs_coredump(const struct coredump_params *cprm)
 {
 	struct pid *pid = cprm->pid;
-	struct pidfs_exit_info *exit_info;
-	struct pidfs_attr *attr;
+	struct pidfs_attr *attr = READ_ONCE(pid->attr);
 	__u32 coredump_mask = 0;
 
 	attr = READ_ONCE(pid->attr);
@@ -656,14 +668,13 @@ void pidfs_coredump(const struct coredump_params *cprm)
 	VFS_WARN_ON_ONCE(!attr);
 	VFS_WARN_ON_ONCE(attr == PIDFS_PID_DEAD);
 
-	exit_info = &attr->__pei;
 	/* Note how we were coredumped. */
 	coredump_mask = pidfs_coredump_mask(cprm->mm_flags);
 	/* Note that we actually did coredump. */
 	coredump_mask |= PIDFD_COREDUMPED;
 	/* If coredumping is set to skip we should never end up here. */
 	VFS_WARN_ON_ONCE(coredump_mask & PIDFD_COREDUMP_SKIP);
-	smp_store_release(&exit_info->coredump_mask, coredump_mask);
+	smp_store_release(&attr->coredump_mask, coredump_mask);
 }
 #endif
 
@@ -924,6 +935,8 @@ int pidfs_register_pid(struct pid *pid)
 	if (unlikely(attr))
 		return 0;
 
+	seqcount_spinlock_init(&new_attr->exit_seq, &pid->wait_pidfd.lock);
+	new_attr->seq = read_seqcount_begin(&new_attr->exit_seq);
 	pid->attr = no_free_ptr(new_attr);
 	return 0;
 }
