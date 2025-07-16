@@ -195,6 +195,24 @@ struct fscrypt_operations {
 int fscrypt_d_revalidate(struct inode *dir, const struct qstr *name,
 			 struct dentry *dentry, unsigned int flags);
 
+static inline bool fscrypt_set_inode_info(struct inode *inode,
+					  struct fscrypt_inode_info *crypt_info)
+{
+	/*
+	 * For existing inodes, multiple tasks may race to set ->i_crypt_info.
+	 * So use cmpxchg_release().  This pairs with the smp_load_acquire() in
+	 * fscrypt_get_inode_info().  I.e., here we publish ->i_crypt_info with
+	 * a RELEASE barrier so that other tasks can ACQUIRE it.
+	 */
+	return cmpxchg_release(&inode->i_crypt_info, NULL, crypt_info) == NULL;
+}
+
+static inline struct fscrypt_inode_info *
+fscrypt_get_inode_info_raw(const struct inode *inode)
+{
+	return inode->i_crypt_info;
+}
+
 static inline struct fscrypt_inode_info *
 fscrypt_get_inode_info(const struct inode *inode)
 {
