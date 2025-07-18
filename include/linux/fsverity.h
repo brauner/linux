@@ -126,6 +126,9 @@ struct fsverity_operations {
 
 static inline struct fsverity_info *fsverity_get_info(const struct inode *inode)
 {
+	if (!IS_VERITY(inode))
+		return NULL;
+
 	/*
 	 * Pairs with the cmpxchg_release() in fsverity_set_info().
 	 * I.e., another task may publish ->i_verity_info concurrently,
@@ -160,7 +163,7 @@ void __fsverity_cleanup_inode(struct inode *inode);
  */
 static inline void fsverity_cleanup_inode(struct inode *inode)
 {
-	if (inode->i_verity_info)
+	if (IS_VERITY(inode))
 		__fsverity_cleanup_inode(inode);
 }
 
