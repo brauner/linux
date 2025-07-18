@@ -800,8 +800,14 @@ EXPORT_SYMBOL_GPL(fscrypt_prepare_new_inode);
  */
 void fscrypt_put_encryption_info(struct inode *inode)
 {
-	put_crypt_info(inode->i_crypt_info);
-	inode->i_crypt_info = NULL;
+	struct fscrypt_inode_info **crypt_info;
+
+	if (inode->i_sb->s_cop->inode_info_offs)
+		crypt_info = fscrypt_addr(inode);
+	else
+		crypt_info = &inode->i_crypt_info;
+	put_crypt_info(*crypt_info);
+	*crypt_info = NULL;
 }
 EXPORT_SYMBOL(fscrypt_put_encryption_info);
 
