@@ -244,17 +244,17 @@ fail:
 void fsverity_set_info(struct inode *inode, struct fsverity_info *vi)
 {
 	/*
-	 * Multiple tasks may race to set ->i_verity_info, so use
+	 * Multiple tasks may race to set the inode's verity info, so use
 	 * cmpxchg_release().  This pairs with the smp_load_acquire() in
-	 * fsverity_get_info().  I.e., here we publish ->i_verity_info with a
-	 * RELEASE barrier so that other tasks can ACQUIRE it.
+	 * fsverity_get_info().  I.e., here we publish the inode's verity info
+	 * with a RELEASE barrier so that other tasks can ACQUIRE it.
 	 */
 	if (cmpxchg_release(fsverity_addr(inode), NULL, vi) != NULL) {
 		/* Lost the race, so free the fsverity_info we allocated. */
 		fsverity_free_info(vi);
 		/*
-		 * Afterwards, the caller may access ->i_verity_info directly,
-		 * so make sure to ACQUIRE the winning fsverity_info.
+		 * Afterwards, the caller may access the inode's verity info
+		 * directly, so make sure to ACQUIRE the winning fsverity_info.
 		 */
 		(void)fsverity_get_info(inode);
 	}
@@ -350,7 +350,7 @@ int fsverity_get_descriptor(struct inode *inode,
 	return 0;
 }
 
-/* Ensure the inode has an ->i_verity_info */
+/* Ensure the inode has fsverity info set */
 static int ensure_verity_info(struct inode *inode)
 {
 	struct fsverity_info *vi = fsverity_get_info(inode);
