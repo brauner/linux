@@ -409,7 +409,7 @@ static __net_init int preinit_net(struct net *net, struct user_namespace *user_n
 	ns_ops = NULL;
 #endif
 
-	ret = ns_common_init(&net->ns, ns_ops, false);
+	ret = ns_common_init(&net->ns, ns_ops, true);
 	if (ret)
 		return ret;
 
@@ -597,6 +597,7 @@ put_userns:
 		net_passive_dec(net);
 dec_ucounts:
 		dec_net_namespaces(ucounts);
+		ns_free_inum(&net->ns);
 		return ERR_PTR(rv);
 	}
 	return net;
@@ -718,6 +719,7 @@ static void cleanup_net(struct work_struct *work)
 #endif
 		put_user_ns(net->user_ns);
 		net_passive_dec(net);
+		ns_free_inum(&net->ns);
 	}
 	WRITE_ONCE(cleanup_net_task, NULL);
 }
@@ -831,31 +833,12 @@ static void net_ns_net_debugfs(struct net *net)
 
 static __net_init int net_ns_net_init(struct net *net)
 {
-	int ret = 0;
-
-	if (net == &init_net)
-		net->ns.inum = PROC_NET_INIT_INO;
-	else
-		ret = proc_alloc_inum(&to_ns_common(net)->inum);
-	if (ret)
-		return ret;
-
 	net_ns_net_debugfs(net);
 	return 0;
 }
 
-static __net_exit void net_ns_net_exit(struct net *net)
-{
-	/*
-	 * Initial network namespace doesn't exit so we don't need any
-	 * special checks here.
-	 */
-	ns_free_inum(&net->ns);
-}
-
 static struct pernet_operations __net_initdata net_ns_ops = {
 	.init = net_ns_net_init,
-	.exit = net_ns_net_exit,
 };
 
 static const struct nla_policy rtnl_net_policy[NETNSA_MAX + 1] = {
