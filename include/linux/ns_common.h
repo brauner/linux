@@ -41,6 +41,7 @@ struct ns_common {
 };
 
 int __ns_common_init(struct ns_common *ns, const struct proc_ns_operations *ops, int inum);
+void __ns_common_free(struct ns_common *ns);
 
 #define to_ns_common(__ns)                              \
 	_Generic((__ns),                                \
@@ -81,5 +82,7 @@ int __ns_common_init(struct ns_common *ns, const struct proc_ns_operations *ops,
 
 #define ns_common_init_inum(__ns, __ops, __inum) \
 	__ns_common_init(&(__ns)->ns, __ops, __inum)
+
+#define ns_common_free(__ns) __ns_common_free(to_ns_common((__ns)))
 
 #endif

@@ -597,7 +597,7 @@ put_userns:
 		net_passive_dec(net);
 dec_ucounts:
 		dec_net_namespaces(ucounts);
-		ns_free_inum(&net->ns);
+		ns_common_free(net);
 		return ERR_PTR(rv);
 	}
 	return net;
@@ -719,7 +719,7 @@ static void cleanup_net(struct work_struct *work)
 #endif
 		put_user_ns(net->user_ns);
 		net_passive_dec(net);
-		ns_free_inum(&net->ns);
+		ns_common_free(net);
 	}
 	WRITE_ONCE(cleanup_net_task, NULL);
 }
