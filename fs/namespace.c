@@ -4104,6 +4104,8 @@ static struct mnt_namespace *alloc_mnt_ns(struct user_namespace *user_ns, bool a
 		return ERR_PTR(-ENOMEM);
 	}
 
+	if (anon)
+		new_ns->ns.inum = MNT_NS_ANON_INO;
 	ret = ns_common_init(&new_ns->ns, &mntns_operations, !anon);
 	if (ret) {
 		kfree(new_ns);
@@ -6020,10 +6022,9 @@ static void __init init_mount_tree(void)
 	if (IS_ERR(mnt))
 		panic("Can't create rootfs");
 
-	ns = alloc_mnt_ns(&init_user_ns, true);
+	ns = alloc_mnt_ns(&init_user_ns, false);
 	if (IS_ERR(ns))
 		panic("Can't allocate initial namespace");
-	ns->ns.inum = PROC_MNT_INIT_INO;
 	m = real_mount(mnt);
 	ns->root = m;
 	ns->nr_mounts = 1;
@@ -6037,7 +6038,7 @@ static void __init init_mount_tree(void)
 	set_fs_pwd(current->fs, &root);
 	set_fs_root(current->fs, &root);
 
-	ns_tree_add(ns);
+	ns_tree_add_raw(ns);
 	init_mnt_ns = ns;
 }
 
