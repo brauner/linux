@@ -81,6 +81,7 @@ static DECLARE_RWSEM(namespace_sem);
 static HLIST_HEAD(unmounted);	/* protected by namespace_sem */
 static LIST_HEAD(ex_mountpoints); /* protected by namespace_sem */
 static struct mnt_namespace *emptied_ns; /* protected by namespace_sem */
+struct mnt_namespace *init_mnt_ns;
 
 #ifdef CONFIG_FSNOTIFY
 LIST_HEAD(notify_list); /* protected by namespace_sem */
@@ -6037,6 +6038,7 @@ static void __init init_mount_tree(void)
 	set_fs_root(current->fs, &root);
 
 	ns_tree_add(ns);
+	init_mnt_ns = ns;
 }
 
 void __init mnt_init(void)
