@@ -110,7 +110,6 @@ int ns_get_path(struct path *path, struct task_struct *task,
 int open_namespace(struct ns_common *ns)
 {
 	struct path path __free(path_put) = {};
-	struct file *f;
 	int err;
 
 	/* call first to consume reference */
@@ -118,16 +117,12 @@ int open_namespace(struct ns_common *ns)
 	if (err < 0)
 		return err;
 
-	CLASS(get_unused_fd, fd)(O_CLOEXEC);
-	if (fd < 0)
-		return fd;
+	FD_PREPARE(fdprep, O_CLOEXEC,
+		   dentry_open(&path, O_RDONLY, current_cred()));
+	if (fd_prepare_failed(fdprep))
+		return fd_prepare_error(fdprep);
 
-	f = dentry_open(&path, O_RDONLY, current_cred());
-	if (IS_ERR(f))
-		return PTR_ERR(f);
-
-	fd_install(fd, f);
-	return take_fd(fd);
+	return fd_publish(fdprep);
 }
 
 int open_related_ns(struct ns_common *ns,
