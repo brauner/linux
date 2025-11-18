@@ -234,9 +234,7 @@ xfs_open_by_handle(
 {
 	const struct cred	*cred = current_cred();
 	int			error;
-	int			fd;
 	int			permflag;
-	struct file		*filp;
 	struct inode		*inode;
 	struct dentry		*dentry;
 	fmode_t			fmode;
@@ -279,28 +277,22 @@ xfs_open_by_handle(
 		goto out_dput;
 	}
 
-	fd = get_unused_fd_flags(0);
-	if (fd < 0) {
-		error = fd;
-		goto out_dput;
-	}
-
 	path.mnt = parfilp->f_path.mnt;
 	path.dentry = dentry;
-	filp = dentry_open(&path, hreq->oflags, cred);
+
+	FD_PREPARE(fdprep, 0, dentry_open(&path, hreq->oflags, cred));
 	dput(dentry);
-	if (IS_ERR(filp)) {
-		put_unused_fd(fd);
-		return PTR_ERR(filp);
-	}
+	if (fd_prepare_failed(fdprep))
+		return fd_prepare_error(fdprep);
 
 	if (S_ISREG(inode->i_mode)) {
+		struct file *filp = fd_prepare_file(fdprep);
+
 		filp->f_flags |= O_NOATIME;
 		filp->f_mode |= FMODE_NOCMTIME;
 	}
 
-	fd_install(fd, filp);
-	return fd;
+	return fd_publish(fdprep);
 
  out_dput:
 	dput(dentry);
