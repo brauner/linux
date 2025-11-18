@@ -514,8 +514,7 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 					       object_count, sizeof(__u32));
 		if (IS_ERR(object_ids)) {
 			ret = PTR_ERR(object_ids);
-			idr_destroy(&leases);
-			goto out_lessor;
+			goto out_idr;
 		}
 
 		/* fill and validate the object idr */
@@ -524,35 +523,26 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 		kfree(object_ids);
 		if (ret) {
 			drm_dbg_lease(dev, "lease object lookup failed: %i\n", ret);
-			idr_destroy(&leases);
-			goto out_lessor;
+			goto out_idr;
 		}
 	}
 
-	/* Allocate a file descriptor for the lease */
-	fd = get_unused_fd_flags(cl->flags & (O_CLOEXEC | O_NONBLOCK));
-	if (fd < 0) {
-		idr_destroy(&leases);
-		ret = fd;
-		goto out_lessor;
+	drm_dbg_lease(dev, "Allocating lease file\n");
+	FD_PREPARE(fdprep, cl->flags & (O_CLOEXEC | O_NONBLOCK),
+		   file_clone_open(lessor_file));
+	if (fd_prepare_failed(fdprep)) {
+		ret = fd_prepare_error(fdprep);
+		goto out_idr;
 	}
+
+	lessee_file = fd_prepare_file(fdprep);
 
 	drm_dbg_lease(dev, "Creating lease\n");
 	/* lessee will take the ownership of leases */
 	lessee = drm_lease_create(lessor, &leases);
-
 	if (IS_ERR(lessee)) {
 		ret = PTR_ERR(lessee);
-		idr_destroy(&leases);
-		goto out_leases;
-	}
-
-	/* Clone the lessor file to create a new file for us */
-	drm_dbg_lease(dev, "Allocating lease file\n");
-	lessee_file = file_clone_open(lessor_file);
-	if (IS_ERR(lessee_file)) {
-		ret = PTR_ERR(lessee_file);
-		goto out_lessee;
+		goto out_idr;
 	}
 
 	lessee_priv = lessee_file->private_data;
@@ -564,21 +554,15 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 
 	/* Pass fd back to userspace */
 	drm_dbg_lease(dev, "Returning fd %d id %d\n", fd, lessee->lessee_id);
-	cl->fd = fd;
 	cl->lessee_id = lessee->lessee_id;
-
-	/* Hook up the fd */
-	fd_install(fd, lessee_file);
+	cl->fd = fd_publish(fdprep);
 
 	drm_master_put(&lessor);
 	drm_dbg_lease(dev, "drm_mode_create_lease_ioctl succeeded\n");
 	return 0;
 
-out_lessee:
-	drm_master_put(&lessee);
-
-out_leases:
-	put_unused_fd(fd);
+out_idr:
+	idr_destroy(&leases);
 
 out_lessor:
 	drm_master_put(&lessor);
