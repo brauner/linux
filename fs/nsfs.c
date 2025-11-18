@@ -327,28 +327,19 @@ static long ns_ioctl(struct file *filp, unsigned int ioctl,
 		if (ret)
 			return ret;
 
-		CLASS(get_unused_fd, fd)(O_CLOEXEC);
-		if (fd < 0)
-			return fd;
+		FD_PREPARE(fdprep, O_CLOEXEC, dentry_open(&path, O_RDONLY, current_cred()));
+		if (fd_prepare_failed(fdprep))
+			return fd_prepare_error(fdprep);
 
-		f = dentry_open(&path, O_RDONLY, current_cred());
-		if (IS_ERR(f))
-			return PTR_ERR(f);
+		/*
+		 * If @uinfo is passed return all information about the
+		 * mount namespace as well.
+		 */
+		ret = copy_ns_info_to_user(to_mnt_ns(ns), uinfo, usize, &kinfo);
+		if (ret)
+			return ret;
 
-		if (uinfo) {
-			/*
-			 * If @uinfo is passed return all information about the
-			 * mount namespace as well.
-			 */
-			ret = copy_ns_info_to_user(to_mnt_ns(ns), uinfo, usize, &kinfo);
-			if (ret)
-				return ret;
-		}
-
-		/* Transfer reference of @f to caller's fdtable. */
-		fd_install(fd, no_free_ptr(f));
-		/* File descriptor is live so hand it off to the caller. */
-		return take_fd(fd);
+		return fd_publish(fdprep);
 	}
 	default:
 		ret = -ENOTTY;
