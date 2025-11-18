@@ -231,32 +231,18 @@ static int test_by_type(const struct path *path, void *p)
  */
 static int autofs_dev_ioctl_open_mountpoint(const char *name, dev_t devid)
 {
-	int err, fd;
+	struct path path __free(path_put) = {};
+	int err;
 
-	fd = get_unused_fd_flags(O_CLOEXEC);
-	if (likely(fd >= 0)) {
-		struct file *filp;
-		struct path path;
+	err = find_autofs_mount(name, &path, test_by_dev, &devid);
+	if (err)
+		return err;
 
-		err = find_autofs_mount(name, &path, test_by_dev, &devid);
-		if (err)
-			goto out;
+	FD_PREPARE(fdprep, O_CLOEXEC, dentry_open(&path, O_RDONLY, current_cred()));
+	if (fd_prepare_failed(fdprep))
+		return fd_prepare_error(fdprep);
 
-		filp = dentry_open(&path, O_RDONLY, current_cred());
-		path_put(&path);
-		if (IS_ERR(filp)) {
-			err = PTR_ERR(filp);
-			goto out;
-		}
-
-		fd_install(fd, filp);
-	}
-
-	return fd;
-
-out:
-	put_unused_fd(fd);
-	return err;
+	return fd_publish(fdprep);
 }
 
 /* Open a file descriptor on an autofs mount point */
