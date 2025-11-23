@@ -48,7 +48,7 @@ When a driver needs to send an out-fence userspace it creates a sync_file.
 
 Interface::
 
-	struct sync_file *sync_file_create(struct dma_fence *fence);
+	struct file *sync_file_create(struct dma_fence *fence);
 
 The caller pass the out-fence and gets back the sync_file. That is just the
 first step, next it needs to install an fd on sync_file->file. So it gets an

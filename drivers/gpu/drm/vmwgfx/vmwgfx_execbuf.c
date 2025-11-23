@@ -4088,7 +4088,7 @@ int vmw_execbuf_process(struct drm_file *file_priv,
 	uint32_t handle = 0;
 	int ret;
 	int32_t out_fence_fd = -1;
-	struct sync_file *sync_file = NULL;
+	struct file *sync_file = NULL;
 	DECLARE_VAL_CONTEXT(val_ctx, sw_context, 1);
 
 	if (flags & DRM_VMW_EXECBUF_FLAG_EXPORT_FENCE_FD) {
@@ -4249,11 +4249,11 @@ int vmw_execbuf_process(struct drm_file *file_priv,
 	if (sync_file) {
 		if (ret) {
 			/* usercopy of fence failed, put the file object */
-			fput(sync_file->file);
+			fput(sync_file);
 			put_unused_fd(out_fence_fd);
 		} else {
 			/* Link the fence with the FD created earlier */
-			fd_install(out_fence_fd, sync_file->file);
+			fd_install(out_fence_fd, sync_file);
 		}
 	}
 

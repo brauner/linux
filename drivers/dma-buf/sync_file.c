@@ -62,7 +62,7 @@ static void fence_check_cb_func(struct dma_fence *f, struct dma_fence_cb *cb)
  * sync_file can be released with fput(sync_file->file). Returns the
  * sync_file or NULL in case of error.
  */
-struct sync_file *sync_file_create(struct dma_fence *fence)
+struct file *sync_file_create(struct dma_fence *fence)
 {
 	struct sync_file *sync_file;
 
@@ -72,7 +72,7 @@ struct sync_file *sync_file_create(struct dma_fence *fence)
 
 	sync_file->fence = dma_fence_get(fence);
 
-	return sync_file;
+	return sync_file->file;
 }
 EXPORT_SYMBOL(sync_file_create);
 

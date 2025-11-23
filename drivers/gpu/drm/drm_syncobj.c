@@ -777,7 +777,7 @@ static int drm_syncobj_export_sync_file(struct drm_file *file_private,
 {
 	int ret;
 	struct dma_fence *fence;
-	struct sync_file *sync_file;
+	struct file *sync_file;
 	int fd = get_unused_fd_flags(O_CLOEXEC);
 
 	if (fd < 0)
@@ -796,7 +796,7 @@ static int drm_syncobj_export_sync_file(struct drm_file *file_private,
 		goto err_put_fd;
 	}
 
-	fd_install(fd, sync_file->file);
+	fd_install(fd, sync_file);
 
 	*p_fd = fd;
 	return 0;

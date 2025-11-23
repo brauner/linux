@@ -557,7 +557,7 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 	struct msm_ringbuffer *ring;
 	struct msm_syncobj_post_dep *post_deps = NULL;
 	struct drm_syncobj **syncobjs_to_reset = NULL;
-	struct sync_file *sync_file = NULL;
+	struct file *sync_file = NULL;
 	unsigned cmds_to_parse;
 	int out_fence_fd = -1;
 	unsigned i;
@@ -818,9 +818,9 @@ out_post_unlock:
 		if (out_fence_fd >= 0)
 			put_unused_fd(out_fence_fd);
 		if (sync_file)
-			fput(sync_file->file);
+			fput(sync_file);
 	} else if (sync_file) {
-		fd_install(out_fence_fd, sync_file->file);
+		fd_install(out_fence_fd, sync_file);
 		args->fence_fd = out_fence_fd;
 	}
 

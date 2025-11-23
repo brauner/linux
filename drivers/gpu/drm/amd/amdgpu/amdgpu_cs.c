@@ -1566,7 +1566,7 @@ int amdgpu_cs_fence_to_handle_ioctl(struct drm_device *dev, void *data,
 	union drm_amdgpu_fence_to_handle *info = data;
 	struct dma_fence *fence;
 	struct drm_syncobj *syncobj;
-	struct sync_file *sync_file;
+	struct file *sync_file;
 	int fd, r;
 
 	fence = amdgpu_cs_get_fence(adev, filp, &info->in.fence);
@@ -1609,7 +1609,7 @@ int amdgpu_cs_fence_to_handle_ioctl(struct drm_device *dev, void *data,
 			return -ENOMEM;
 		}
 
-		fd_install(fd, sync_file->file);
+		fd_install(fd, sync_file);
 		info->out.handle = fd;
 		return 0;
 

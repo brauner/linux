@@ -1408,7 +1408,7 @@ msm_ioctl_vm_bind(struct drm_device *dev, void *data, struct drm_file *file)
 	struct msm_gpu_submitqueue *queue;
 	struct msm_syncobj_post_dep *post_deps = NULL;
 	struct drm_syncobj **syncobjs_to_reset = NULL;
-	struct sync_file *sync_file = NULL;
+	struct file *sync_file = NULL;
 	struct dma_fence *fence;
 	int out_fence_fd = -1;
 	int ret, nr_bos = 0;
@@ -1563,9 +1563,9 @@ out_post_unlock:
 		if (out_fence_fd >= 0)
 			put_unused_fd(out_fence_fd);
 		if (sync_file)
-			fput(sync_file->file);
+			fput(sync_file);
 	} else if (sync_file) {
-		fd_install(out_fence_fd, sync_file->file);
+		fd_install(out_fence_fd, sync_file);
 		args->fence_fd = out_fence_fd;
 	}
 

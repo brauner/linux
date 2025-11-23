@@ -418,15 +418,18 @@ static int virtio_gpu_init_submit(struct virtio_gpu_submit *submit,
 		return PTR_ERR(submit->buf);
 
 	if (exbuf->flags & VIRTGPU_EXECBUF_FENCE_FD_OUT) {
+		struct file *sync_file;
+
 		err = get_unused_fd_flags(O_CLOEXEC);
 		if (err < 0)
 			return err;
 
 		submit->out_fence_fd = err;
 
-		submit->sync_file = sync_file_create(&out_fence->f);
-		if (!submit->sync_file)
+		sync_file = sync_file_create(&out_fence->f);
+		if (!sync_file)
 			return -ENOMEM;
+		submit->sync_file = sync_file->private_data;
 	}
 
 	return 0;

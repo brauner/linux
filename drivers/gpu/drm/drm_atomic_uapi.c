@@ -1180,6 +1180,8 @@ struct drm_out_fence_state {
 static int setup_out_fence(struct drm_out_fence_state *fence_state,
 			   struct dma_fence *fence)
 {
+	struct file *sync_file;
+
 	fence_state->fd = get_unused_fd_flags(O_CLOEXEC);
 	if (fence_state->fd < 0)
 		return fence_state->fd;
@@ -1187,9 +1189,10 @@ static int setup_out_fence(struct drm_out_fence_state *fence_state,
 	if (put_user(fence_state->fd, fence_state->out_fence_ptr))
 		return -EFAULT;
 
-	fence_state->sync_file = sync_file_create(fence);
-	if (!fence_state->sync_file)
+	sync_file = sync_file_create(fence);
+	if (!sync_file)
 		return -ENOMEM;
+	fence_state->sync_file = sync_file->private_data;
 
 	return 0;
 }

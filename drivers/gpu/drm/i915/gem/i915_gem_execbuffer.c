@@ -3197,7 +3197,7 @@ static void eb_requests_put(struct i915_execbuffer *eb)
 static struct sync_file *
 eb_composite_fence_create(struct i915_execbuffer *eb, int out_fence_fd)
 {
-	struct sync_file *out_fence = NULL;
+	struct file *out_fence = NULL;
 	struct dma_fence_array *fence_array;
 	struct dma_fence **fences;
 	unsigned int i;
@@ -3238,7 +3238,7 @@ eb_composite_fence_create(struct i915_execbuffer *eb, int out_fence_fd)
 
 	eb->composite_fence = &fence_array->base;
 
-	return out_fence;
+	return out_fence->private_data;
 }
 
 static struct sync_file *
@@ -3278,9 +3278,10 @@ eb_fences_add(struct i915_execbuffer *eb, struct i915_request *rq,
 		if (IS_ERR(out_fence))
 			return ERR_PTR(-ENOMEM);
 	} else if (out_fence_fd != -1) {
-		out_fence = sync_file_create(&rq->fence);
-		if (!out_fence)
+		struct file *out_fence_file = sync_file_create(&rq->fence);
+		if (!out_fence_file)
 			return ERR_PTR(-ENOMEM);
+		out_fence = out_fence_file->private_data;
 	}
 
 	return out_fence;

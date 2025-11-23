@@ -414,7 +414,7 @@ static long dma_buf_export_sync_file(struct dma_buf *dmabuf,
 	struct dma_buf_export_sync_file arg;
 	enum dma_resv_usage usage;
 	struct dma_fence *fence = NULL;
-	struct sync_file *sync_file;
+	struct file *sync_file;
 	int fd, ret;
 
 	if (copy_from_user(&arg, user_data, sizeof(arg)))
@@ -453,12 +453,12 @@ static long dma_buf_export_sync_file(struct dma_buf *dmabuf,
 		goto err_put_file;
 	}
 
-	fd_install(fd, sync_file->file);
+	fd_install(fd, sync_file);
 
 	return 0;
 
 err_put_file:
-	fput(sync_file->file);
+	fput(sync_file);
 err_put_fd:
 	put_unused_fd(fd);
 	return ret;

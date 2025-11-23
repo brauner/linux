@@ -419,7 +419,7 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 	struct drm_etnaviv_gem_submit_bo *bos;
 	struct etnaviv_gem_submit *submit;
 	struct etnaviv_gpu *gpu;
-	struct sync_file *sync_file = NULL;
+	struct file *sync_file = NULL;
 	struct ww_acquire_ctx ticket;
 	int out_fence_fd = -1;
 	struct pid *pid = get_pid(task_pid(current));
@@ -608,7 +608,7 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 			 */
 			goto err_submit_put;
 		}
-		fd_install(out_fence_fd, sync_file->file);
+		fd_install(out_fence_fd, sync_file);
 	}
 
 	args->fence_fd = out_fence_fd;
