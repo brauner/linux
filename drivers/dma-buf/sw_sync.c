@@ -344,7 +344,6 @@ static long sw_sync_ioctl_create_fence(struct sync_timeline *obj,
 				       unsigned long arg)
 {
 	struct sync_pt *pt;
-	struct file *sync_file;
 	struct sw_sync_create_fence_data data;
 
 	if (copy_from_user(&data, (void __user *)arg, sizeof(data)))
@@ -354,16 +353,10 @@ static long sw_sync_ioctl_create_fence(struct sync_timeline *obj,
 	if (!pt)
 		return -ENOMEM;
 
-	sync_file = sync_file_create(&pt->base);
+	FD_PREPARE(fdf, O_CLOEXEC, sync_file_create(&pt->base));
 	dma_fence_put(&pt->base);
-	if (!sync_file)
-		return -ENOMEM;
-
-	FD_PREPARE(fdf, O_CLOEXEC, sync_file);
-	if (fdf.err) {
-		fput(sync_file);
+	if (fdf.err)
 		return fdf.err;
-	}
 
 	data.fence = fd_prepare_fd(fdf);
 	if (copy_to_user((void __user *)arg, &data, sizeof(data)))
