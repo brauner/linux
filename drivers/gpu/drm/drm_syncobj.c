@@ -777,33 +777,20 @@ static int drm_syncobj_export_sync_file(struct drm_file *file_private,
 {
 	int ret;
 	struct dma_fence *fence;
-	struct file *sync_file;
-	int fd = get_unused_fd_flags(O_CLOEXEC);
-
-	if (fd < 0)
-		return fd;
 
 	ret = drm_syncobj_find_fence(file_private, handle, point, 0, &fence);
 	if (ret)
-		goto err_put_fd;
+		return ret;
 
-	sync_file = sync_file_create(fence);
-
+	ret = FD_ADD(O_CLOEXEC, sync_file_create(fence));
 	dma_fence_put(fence);
+	if (ret < 0)
+		return ret;
 
-	if (!sync_file) {
-		ret = -EINVAL;
-		goto err_put_fd;
-	}
-
-	fd_install(fd, sync_file);
-
-	*p_fd = fd;
+	*p_fd = ret;
 	return 0;
-err_put_fd:
-	put_unused_fd(fd);
-	return ret;
 }
+
 /**
  * drm_syncobj_open - initializes syncobj file-private structures at devnode open time
  * @file_private: drm file-private structure to set up
