@@ -1607,10 +1607,9 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 	struct gpio_v2_line_request ulr;
 	struct gpio_v2_line_config *lc;
 	struct linereq *lr __free(linereq_free) = NULL;
-	struct file *file;
 	u64 flags, edflags;
 	unsigned int i;
-	int fd, ret;
+	int ret;
 
 	if (copy_from_user(&ulr, ip, sizeof(ulr)))
 		return -EFAULT;
@@ -1714,38 +1713,22 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 	if (ret)
 		return ret;
 
-	fd = get_unused_fd_flags(O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return fd;
+	FD_PREPARE(fdf, O_RDONLY | O_CLOEXEC,
+		   anon_inode_getfile("gpio-line", &line_fileops, lr,
+				      O_RDONLY | O_CLOEXEC));
+	if (fdf.err)
+		return fdf.err;
 
-	file = anon_inode_getfile("gpio-line", &line_fileops, lr,
-				  O_RDONLY | O_CLOEXEC);
-	if (IS_ERR(file)) {
-		ret = PTR_ERR(file);
-		goto out_put_unused_fd;
-	}
-
-	ulr.fd = fd;
-	if (copy_to_user(ip, &ulr, sizeof(ulr))) {
-		/*
-		 * fput() will trigger the release() callback, so do not go onto
-		 * the regular error cleanup path here.
-		 */
-		fput(file);
-		put_unused_fd(fd);
+	ulr.fd = fd_prepare_fd(fdf);
+	if (copy_to_user(ip, &ulr, sizeof(ulr)))
 		return -EFAULT;
-	}
 
-	fd_install(fd, file);
+	fd_publish(fdf);
 
 	dev_dbg(&gdev->dev, "registered chardev handle for %d lines\n",
 		lr->num_lines);
 
 	return 0;
-
-out_put_unused_fd:
-	put_unused_fd(fd);
-	return ret;
 }
 
 #ifdef CONFIG_GPIO_CDEV_V1
