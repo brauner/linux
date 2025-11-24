@@ -1760,7 +1760,6 @@ int __sys_socketpair(int family, int type, int protocol, int __user *usockvec)
 {
 	struct socket *sock1, *sock2;
 	int fd1, fd2, err;
-	struct file *newfile1, *newfile2;
 	int flags;
 
 	flags = type & ~SOCK_TYPE_MASK;
@@ -1775,23 +1774,23 @@ int __sys_socketpair(int family, int type, int protocol, int __user *usockvec)
 	 * reserve descriptors and make sure we won't fail
 	 * to return them to userland.
 	 */
-	fd1 = get_unused_fd_flags(flags);
-	if (unlikely(fd1 < 0))
-		return fd1;
+	FD_PREPARE(fdf1, flags);
+	if (fdf1.err)
+		return fdf1.err;
 
-	fd2 = get_unused_fd_flags(flags);
-	if (unlikely(fd2 < 0)) {
-		put_unused_fd(fd1);
-		return fd2;
-	}
+	FD_PREPARE(fdf2, flags);
+	if (fdf2.err)
+		return fdf2.err;
 
+	fd1 = fd_prepare_fd(fdf1);
 	err = put_user(fd1, &usockvec[0]);
 	if (err)
-		goto out;
+		return err;
 
+	fd2 = fd_prepare_fd(fdf2);
 	err = put_user(fd2, &usockvec[1]);
 	if (err)
-		goto out;
+		return err;
 
 	/*
 	 * Obtain the first socket and check if the underlying protocol
@@ -1800,52 +1799,43 @@ int __sys_socketpair(int family, int type, int protocol, int __user *usockvec)
 
 	err = sock_create(family, type, protocol, &sock1);
 	if (unlikely(err < 0))
-		goto out;
+		return err;
 
 	err = sock_create(family, type, protocol, &sock2);
 	if (unlikely(err < 0)) {
 		sock_release(sock1);
-		goto out;
+		return err;
 	}
 
 	err = security_socket_socketpair(sock1, sock2);
 	if (unlikely(err)) {
 		sock_release(sock2);
 		sock_release(sock1);
-		goto out;
+		return err;
 	}
 
 	err = READ_ONCE(sock1->ops)->socketpair(sock1, sock2);
 	if (unlikely(err < 0)) {
 		sock_release(sock2);
 		sock_release(sock1);
-		goto out;
+		return err;
 	}
 
-	newfile1 = sock_alloc_file(sock1, flags, NULL);
-	if (IS_ERR(newfile1)) {
-		err = PTR_ERR(newfile1);
+	err = FD_FILE_CLAIM(fdf1, sock_alloc_file(sock1, flags, NULL));
+	if (err) {
 		sock_release(sock2);
-		goto out;
+		return err;
 	}
 
-	newfile2 = sock_alloc_file(sock2, flags, NULL);
-	if (IS_ERR(newfile2)) {
-		err = PTR_ERR(newfile2);
-		fput(newfile1);
-		goto out;
-	}
+	err = FD_FILE_CLAIM(fdf2, sock_alloc_file(sock2, flags, NULL));
+	if (err)
+		return err;
 
 	audit_fd_pair(fd1, fd2);
 
-	fd_install(fd1, newfile1);
-	fd_install(fd2, newfile2);
+	fd_publish(fdf1);
+	fd_publish(fdf2);
 	return 0;
-
-out:
-	put_unused_fd(fd2);
-	put_unused_fd(fd1);
-	return err;
 }
 
 SYSCALL_DEFINE4(socketpair, int, family, int, type, int, protocol,
