@@ -1600,11 +1600,13 @@ static const struct file_operations line_fileops = {
 #endif
 };
 
+DEFINE_FREE(linereq_free, struct linereq *, if (!IS_ERR_OR_NULL(_T)) linereq_free(_T))
+
 static int linereq_create(struct gpio_device *gdev, void __user *ip)
 {
 	struct gpio_v2_line_request ulr;
 	struct gpio_v2_line_config *lc;
-	struct linereq *lr;
+	struct linereq *lr __free(linereq_free) = NULL;
 	struct file *file;
 	u64 flags, edflags;
 	unsigned int i;
@@ -1641,10 +1643,8 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 		/* label is only initialized if consumer is set */
 		lr->label = kstrndup(ulr.consumer, sizeof(ulr.consumer) - 1,
 				     GFP_KERNEL);
-		if (!lr->label) {
-			ret = -ENOMEM;
-			goto out_free_linereq;
-		}
+		if (!lr->label)
+			return -ENOMEM;
 	}
 
 	mutex_init(&lr->config_mutex);
@@ -1663,14 +1663,12 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 		u32 offset = ulr.offsets[i];
 		struct gpio_desc *desc = gpio_device_get_desc(gdev, offset);
 
-		if (IS_ERR(desc)) {
-			ret = PTR_ERR(desc);
-			goto out_free_linereq;
-		}
+		if (IS_ERR(desc))
+			return PTR_ERR(desc);
 
 		ret = gpiod_request_user(desc, lr->label);
 		if (ret)
-			goto out_free_linereq;
+			return ret;
 
 		lr->lines[i].desc = desc;
 		flags = gpio_v2_line_config_flags(lc, i);
@@ -1678,7 +1676,7 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 
 		ret = gpiod_set_transitory(desc, false);
 		if (ret < 0)
-			goto out_free_linereq;
+			return ret;
 
 		edflags = flags & GPIO_V2_LINE_EDGE_DETECTOR_FLAGS;
 		/*
@@ -1690,16 +1688,16 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 
 			ret = gpiod_direction_output_nonotify(desc, val);
 			if (ret)
-				goto out_free_linereq;
+				return ret;
 		} else if (flags & GPIO_V2_LINE_FLAG_INPUT) {
 			ret = gpiod_direction_input_nonotify(desc);
 			if (ret)
-				goto out_free_linereq;
+				return ret;
 
 			ret = edge_detector_setup(&lr->lines[i], lc, i,
 						  edflags);
 			if (ret)
-				goto out_free_linereq;
+				return ret;
 		}
 
 		lr->lines[i].edflags = edflags;
@@ -1714,13 +1712,11 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 	ret = blocking_notifier_chain_register(&gdev->device_notifier,
 					       &lr->device_unregistered_nb);
 	if (ret)
-		goto out_free_linereq;
+		return ret;
 
 	fd = get_unused_fd_flags(O_RDONLY | O_CLOEXEC);
-	if (fd < 0) {
-		ret = fd;
-		goto out_free_linereq;
-	}
+	if (fd < 0)
+		return fd;
 
 	file = anon_inode_getfile("gpio-line", &line_fileops, lr,
 				  O_RDONLY | O_CLOEXEC);
@@ -1749,8 +1745,6 @@ static int linereq_create(struct gpio_device *gdev, void __user *ip)
 
 out_put_unused_fd:
 	put_unused_fd(fd);
-out_free_linereq:
-	linereq_free(lr);
 	return ret;
 }
 
