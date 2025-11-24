@@ -1566,8 +1566,7 @@ int amdgpu_cs_fence_to_handle_ioctl(struct drm_device *dev, void *data,
 	union drm_amdgpu_fence_to_handle *info = data;
 	struct dma_fence *fence;
 	struct drm_syncobj *syncobj;
-	struct file *sync_file;
-	int fd, r;
+	int r;
 
 	fence = amdgpu_cs_get_fence(adev, filp, &info->in.fence);
 	if (IS_ERR(fence))
@@ -1596,21 +1595,11 @@ int amdgpu_cs_fence_to_handle_ioctl(struct drm_device *dev, void *data,
 		return r;
 
 	case AMDGPU_FENCE_TO_HANDLE_GET_SYNC_FILE_FD:
-		fd = get_unused_fd_flags(O_CLOEXEC);
-		if (fd < 0) {
-			dma_fence_put(fence);
-			return fd;
-		}
-
-		sync_file = sync_file_create(fence);
+		r = FD_ADD(O_CLOEXEC, sync_file_create(fence));
 		dma_fence_put(fence);
-		if (!sync_file) {
-			put_unused_fd(fd);
-			return -ENOMEM;
-		}
-
-		fd_install(fd, sync_file);
-		info->out.handle = fd;
+		if (r < 0)
+			return r;
+		info->out.handle = r;
 		return 0;
 
 	default:
