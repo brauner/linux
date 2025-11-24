@@ -482,10 +482,8 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 	struct idr leases;
 	struct drm_master *lessor;
 	struct drm_master *lessee = NULL;
-	struct file *lessee_file = NULL;
 	struct file *lessor_file = lessor_priv->filp;
 	struct drm_file *lessee_priv;
-	int fd = -1;
 	uint32_t *object_ids;
 
 	/* Can't lease without MODESET */
@@ -496,6 +494,10 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 		drm_dbg_lease(dev, "invalid flags\n");
 		return -EINVAL;
 	}
+
+	FD_PREPARE(fdf, cl->flags & (O_CLOEXEC | O_NONBLOCK));
+	if (fdf.err)
+		return fdf.err;
 
 	lessor = drm_file_get_master(lessor_priv);
 	/* Do not allow sub-leases */
@@ -529,14 +531,6 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 		}
 	}
 
-	/* Allocate a file descriptor for the lease */
-	fd = get_unused_fd_flags(cl->flags & (O_CLOEXEC | O_NONBLOCK));
-	if (fd < 0) {
-		idr_destroy(&leases);
-		ret = fd;
-		goto out_lessor;
-	}
-
 	drm_dbg_lease(dev, "Creating lease\n");
 	/* lessee will take the ownership of leases */
 	lessee = drm_lease_create(lessor, &leases);
@@ -544,31 +538,27 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 	if (IS_ERR(lessee)) {
 		ret = PTR_ERR(lessee);
 		idr_destroy(&leases);
-		goto out_leases;
+		goto out_lessor;
 	}
 
 	/* Clone the lessor file to create a new file for us */
 	drm_dbg_lease(dev, "Allocating lease file\n");
-	lessee_file = file_clone_open(lessor_file);
-	if (IS_ERR(lessee_file)) {
-		ret = PTR_ERR(lessee_file);
-		goto out_lessee;
-	}
 
-	lessee_priv = lessee_file->private_data;
+	ret = FD_FILE_CLAIM(fdf, file_clone_open(lessor_file));
+	if (ret)
+		goto out_lessee;
+
+	lessee_priv = fd_prepare_file(fdf)->private_data;
 	/* Change the file to a master one */
 	drm_master_put(&lessee_priv->master);
 	lessee_priv->master = lessee;
 	lessee_priv->is_master = 1;
 	lessee_priv->authenticated = 1;
 
-	/* Pass fd back to userspace */
-	drm_dbg_lease(dev, "Returning fd %d id %d\n", fd, lessee->lessee_id);
-	cl->fd = fd;
-	cl->lessee_id = lessee->lessee_id;
-
 	/* Hook up the fd */
-	fd_install(fd, lessee_file);
+	cl->fd = fd_publish(fdf);
+	drm_dbg_lease(dev, "Returning fd %d id %d\n", cl->fd, lessee->lessee_id);
+	cl->lessee_id = lessee->lessee_id;
 
 	drm_master_put(&lessor);
 	drm_dbg_lease(dev, "drm_mode_create_lease_ioctl succeeded\n");
@@ -576,9 +566,6 @@ int drm_mode_create_lease_ioctl(struct drm_device *dev,
 
 out_lessee:
 	drm_master_put(&lessee);
-
-out_leases:
-	put_unused_fd(fd);
 
 out_lessor:
 	drm_master_put(&lessor);
