@@ -419,7 +419,6 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 	struct drm_etnaviv_gem_submit_bo *bos;
 	struct etnaviv_gem_submit *submit;
 	struct etnaviv_gpu *gpu;
-	struct file *sync_file = NULL;
 	struct ww_acquire_ctx ticket;
 	int out_fence_fd = -1;
 	struct pid *pid = get_pid(task_pid(current));
@@ -502,14 +501,6 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 	if (ret) {
 		ret = -EFAULT;
 		goto err_submit_cmds;
-	}
-
-	if (args->flags & ETNA_SUBMIT_FENCE_FD_OUT) {
-		out_fence_fd = get_unused_fd_flags(O_CLOEXEC);
-		if (out_fence_fd < 0) {
-			ret = out_fence_fd;
-			goto err_submit_cmds;
-		}
 	}
 
 	ww_acquire_init(&ticket, &reservation_ww_class);
@@ -595,12 +586,12 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 		/*
 		 * This can be improved: ideally we want to allocate the sync
 		 * file before kicking off the GPU job and just attach the
-		 * fence to the sync file here, eliminating the ENOMEM
+		 * fence to the sync file here, eliminating the error
 		 * possibility at this stage.
 		 */
-		sync_file = sync_file_create(submit->out_fence);
-		if (!sync_file) {
-			ret = -ENOMEM;
+		out_fence_fd = FD_ADD(O_CLOEXEC, sync_file_create(submit->out_fence));
+		if (out_fence_fd < 0) {
+			ret = out_fence_fd;
 			/*
 			 * When this late error is hit, the submit has already
 			 * been handed over to the scheduler. At this point
@@ -608,7 +599,6 @@ int etnaviv_ioctl_gem_submit(struct drm_device *dev, void *data,
 			 */
 			goto err_submit_put;
 		}
-		fd_install(out_fence_fd, sync_file);
 	}
 
 	args->fence_fd = out_fence_fd;
@@ -624,8 +614,6 @@ err_submit_ww_acquire:
 	ww_acquire_fini(&ticket);
 
 err_submit_cmds:
-	if (ret && (out_fence_fd >= 0))
-		put_unused_fd(out_fence_fd);
 	kvfree(stream);
 	kvfree(bos);
 	kvfree(relocs);
