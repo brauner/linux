@@ -2031,11 +2031,9 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 	struct gpioevent_request eventreq;
 	struct lineevent_state *le __free(lineevent_free) = NULL;
 	struct gpio_desc *desc;
-	struct file *file;
 	u32 offset;
 	u32 lflags;
 	u32 eflags;
-	int fd;
 	int ret;
 	int irq, irqflags = 0;
 	char *label;
@@ -2137,34 +2135,19 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 
 	le->irq = irq;
 
-	fd = get_unused_fd_flags(O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return fd;
+	FD_PREPARE(fdf, O_RDONLY | O_CLOEXEC,
+		   anon_inode_getfile("gpio-event", &lineevent_fileops, le,
+				      O_RDONLY | O_CLOEXEC));
+	if (fdf.err)
+		return fdf.err;
 
-	file = anon_inode_getfile("gpio-event", &lineevent_fileops, le, O_RDONLY | O_CLOEXEC);
-	if (IS_ERR(file)) {
-		ret = PTR_ERR(file);
-		goto out_put_unused_fd;
-	}
-
-	eventreq.fd = fd;
-	if (copy_to_user(ip, &eventreq, sizeof(eventreq))) {
-		/*
-		 * fput() will trigger the release() callback, so do not go onto
-		 * the regular error cleanup path here.
-		 */
-		fput(file);
-		put_unused_fd(fd);
+	eventreq.fd = fd_prepare_fd(fdf);
+	if (copy_to_user(ip, &eventreq, sizeof(eventreq)))
 		return -EFAULT;
-	}
 
-	fd_install(fd, file);
+	fd_publish(fdf);
 
 	return 0;
-
-out_put_unused_fd:
-	put_unused_fd(fd);
-	return ret;
 }
 
 static void gpio_v2_line_info_to_v1(struct gpio_v2_line_info *info_v2,
