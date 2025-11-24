@@ -672,25 +672,12 @@ static const struct file_operations drm_syncobj_file_fops = {
  */
 int drm_syncobj_get_fd(struct drm_syncobj *syncobj, int *p_fd)
 {
-	struct file *file;
-	int fd;
-
-	fd = get_unused_fd_flags(O_CLOEXEC);
-	if (fd < 0)
-		return fd;
-
-	file = anon_inode_getfile("syncobj_file",
-				  &drm_syncobj_file_fops,
-				  syncobj, 0);
-	if (IS_ERR(file)) {
-		put_unused_fd(fd);
-		return PTR_ERR(file);
-	}
-
+	FD_PREPARE(fdf, O_CLOEXEC,
+		   anon_inode_getfile("syncobj_file", &drm_syncobj_file_fops, syncobj, 0));
+	if (fdf.err)
+		return fdf.err;
 	drm_syncobj_get(syncobj);
-	fd_install(fd, file);
-
-	*p_fd = fd;
+	*p_fd = fd_publish(fdf);;
 	return 0;
 }
 EXPORT_SYMBOL(drm_syncobj_get_fd);
