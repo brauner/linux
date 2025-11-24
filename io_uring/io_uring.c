@@ -3652,13 +3652,7 @@ static __cold int io_allocate_scq_urings(struct io_ring_ctx *ctx,
 
 static int io_uring_install_fd(struct file *file)
 {
-	int fd;
-
-	fd = get_unused_fd_flags(O_RDWR | O_CLOEXEC);
-	if (fd < 0)
-		return fd;
-	fd_install(fd, file);
-	return fd;
+	return FD_ADD(O_RDWR | O_CLOEXEC, file);
 }
 
 /*
