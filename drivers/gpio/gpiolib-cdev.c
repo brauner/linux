@@ -2024,10 +2024,12 @@ static irqreturn_t lineevent_irq_handler(int irq, void *p)
 	return IRQ_WAKE_THREAD;
 }
 
+DEFINE_FREE(lineevent_free, struct lineevent_state *, if (!IS_ERR_OR_NULL(_T)) lineevent_free(_T))
+
 static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 {
 	struct gpioevent_request eventreq;
-	struct lineevent_state *le;
+	struct lineevent_state *le __free(lineevent_free) = NULL;
 	struct gpio_desc *desc;
 	struct file *file;
 	u32 offset;
@@ -2078,15 +2080,13 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 		le->label = kstrndup(eventreq.consumer_label,
 				     sizeof(eventreq.consumer_label) - 1,
 				     GFP_KERNEL);
-		if (!le->label) {
-			ret = -ENOMEM;
-			goto out_free_le;
-		}
+		if (!le->label)
+			return -ENOMEM;
 	}
 
 	ret = gpiod_request_user(desc, le->label);
 	if (ret)
-		goto out_free_le;
+		return ret;
 	le->desc = desc;
 	le->eflags = eflags;
 
@@ -2094,15 +2094,13 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 
 	ret = gpiod_direction_input(desc);
 	if (ret)
-		goto out_free_le;
+		return ret;
 
 	gpiod_line_state_notify(desc, GPIO_V2_LINE_CHANGED_REQUESTED);
 
 	irq = gpiod_to_irq(desc);
-	if (irq <= 0) {
-		ret = -ENODEV;
-		goto out_free_le;
-	}
+	if (irq <= 0)
+		return -ENODEV;
 
 	if (eflags & GPIOEVENT_REQUEST_RISING_EDGE)
 		irqflags |= test_bit(GPIOD_FLAG_ACTIVE_LOW, &desc->flags) ?
@@ -2119,13 +2117,11 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 	ret = blocking_notifier_chain_register(&gdev->device_notifier,
 					       &le->device_unregistered_nb);
 	if (ret)
-		goto out_free_le;
+		return ret;
 
 	label = make_irq_label(le->label);
-	if (IS_ERR(label)) {
-		ret = PTR_ERR(label);
-		goto out_free_le;
-	}
+	if (IS_ERR(label))
+		return PTR_ERR(label);
 
 	/* Request a thread to read the events */
 	ret = request_threaded_irq(irq,
@@ -2136,21 +2132,16 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 				   le);
 	if (ret) {
 		free_irq_label(label);
-		goto out_free_le;
+		return ret;
 	}
 
 	le->irq = irq;
 
 	fd = get_unused_fd_flags(O_RDONLY | O_CLOEXEC);
-	if (fd < 0) {
-		ret = fd;
-		goto out_free_le;
-	}
+	if (fd < 0)
+		return fd;
 
-	file = anon_inode_getfile("gpio-event",
-				  &lineevent_fileops,
-				  le,
-				  O_RDONLY | O_CLOEXEC);
+	file = anon_inode_getfile("gpio-event", &lineevent_fileops, le, O_RDONLY | O_CLOEXEC);
 	if (IS_ERR(file)) {
 		ret = PTR_ERR(file);
 		goto out_put_unused_fd;
@@ -2173,8 +2164,6 @@ static int lineevent_create(struct gpio_device *gdev, void __user *ip)
 
 out_put_unused_fd:
 	put_unused_fd(fd);
-out_free_le:
-	lineevent_free(le);
 	return ret;
 }
 
