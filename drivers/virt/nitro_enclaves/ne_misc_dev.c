@@ -1592,8 +1592,6 @@ static const struct file_operations ne_enclave_fops = {
 static int ne_create_vm_ioctl(struct ne_pci_dev *ne_pci_dev, u64 __user *slot_uid)
 {
 	struct ne_pci_dev_cmd_reply cmd_reply = {};
-	int enclave_fd = -1;
-	struct file *enclave_file = NULL;
 	unsigned int i = 0;
 	struct ne_enclave *ne_enclave = NULL;
 	struct pci_dev *pdev = ne_pci_dev->pdev;
@@ -1629,6 +1627,12 @@ static int ne_create_vm_ioctl(struct ne_pci_dev *ne_pci_dev, u64 __user *slot_ui
 
 	mutex_unlock(&ne_cpu_pool.mutex);
 
+	FD_PREPARE(fdf, O_CLOEXEC);
+	if (fdf.err) {
+		rc = fdf.err;
+		goto free_ne_enclave;
+	}
+
 	ne_enclave->threads_per_core = kcalloc(ne_enclave->nr_parent_vm_cores,
 					       sizeof(*ne_enclave->threads_per_core),
 					       GFP_KERNEL);
@@ -1651,25 +1655,9 @@ static int ne_create_vm_ioctl(struct ne_pci_dev *ne_pci_dev, u64 __user *slot_ui
 		goto free_cpumask;
 	}
 
-	enclave_fd = get_unused_fd_flags(O_CLOEXEC);
-	if (enclave_fd < 0) {
-		rc = enclave_fd;
-
-		dev_err_ratelimited(ne_misc_dev.this_device,
-				    "Error in getting unused fd [rc=%d]\n", rc);
-
+	rc = FD_FILE_CLAIM(fdf, anon_inode_getfile("ne-vm", &ne_enclave_fops, ne_enclave, O_RDWR));
+	if (rc)
 		goto free_cpumask;
-	}
-
-	enclave_file = anon_inode_getfile("ne-vm", &ne_enclave_fops, ne_enclave, O_RDWR);
-	if (IS_ERR(enclave_file)) {
-		rc = PTR_ERR(enclave_file);
-
-		dev_err_ratelimited(ne_misc_dev.this_device,
-				    "Error in anon inode get file [rc=%d]\n", rc);
-
-		goto put_fd;
-	}
 
 	rc = ne_do_request(pdev, SLOT_ALLOC,
 			   &slot_alloc_req, sizeof(slot_alloc_req),
@@ -1678,7 +1666,7 @@ static int ne_create_vm_ioctl(struct ne_pci_dev *ne_pci_dev, u64 __user *slot_ui
 		dev_err_ratelimited(ne_misc_dev.this_device,
 				    "Error in slot alloc [rc=%d]\n", rc);
 
-		goto put_file;
+		goto free_cpumask;
 	}
 
 	init_waitqueue_head(&ne_enclave->eventq);
@@ -1692,27 +1680,17 @@ static int ne_create_vm_ioctl(struct ne_pci_dev *ne_pci_dev, u64 __user *slot_ui
 
 	list_add(&ne_enclave->enclave_list_entry, &ne_pci_dev->enclaves_list);
 
-	if (copy_to_user(slot_uid, &ne_enclave->slot_uid, sizeof(ne_enclave->slot_uid))) {
-		/*
-		 * As we're holding the only reference to 'enclave_file', fput()
-		 * will call ne_enclave_release() which will do a proper cleanup
-		 * of all so far allocated resources, leaving only the unused fd
-		 * for us to free.
-		 */
-		fput(enclave_file);
-		put_unused_fd(enclave_fd);
-
+	/*
+	 * As we're holding the only reference to 'enclave_file', fput()
+	 * will call ne_enclave_release() which will do a proper cleanup
+	 * of all so far allocated resources, leaving only the unused fd
+	 * for us to free.
+	 */
+	if (copy_to_user(slot_uid, &ne_enclave->slot_uid, sizeof(ne_enclave->slot_uid)))
 		return -EFAULT;
-	}
 
-	fd_install(enclave_fd, enclave_file);
+	return fd_publish(fdf);
 
-	return enclave_fd;
-
-put_file:
-	fput(enclave_file);
-put_fd:
-	put_unused_fd(enclave_fd);
 free_cpumask:
 	free_cpumask_var(ne_enclave->vcpu_ids);
 	for (i = 0; i < ne_enclave->nr_parent_vm_cores; i++)
