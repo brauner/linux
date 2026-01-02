@@ -2485,6 +2485,7 @@ int count_mounts(struct mnt_namespace *ns, struct mount *mnt)
 enum mnt_tree_flags_t {
 	MNT_TREE_BENEATH = BIT(0),
 	MNT_TREE_PROPAGATION = BIT(1),
+	MNT_TREE_PIVOT_ROOT = BIT(2),
 };
 
 /**
@@ -3385,6 +3386,7 @@ static bool mount_is_ancestor(const struct mount *p1, const struct mount *p2)
  * @mnt_from: mount we are trying to move
  * @mnt_to:   mount under which to mount
  * @mp:   mountpoint of @mnt_to
+ * @flags: mount tree modification flags
  *
  * - Make sure that nothing can be mounted beneath the caller's current
  *   root or the rootfs of the namespace.
@@ -3401,7 +3403,8 @@ static bool mount_is_ancestor(const struct mount *p1, const struct mount *p2)
  */
 static int can_move_mount_beneath(const struct mount *mnt_from,
 				  const struct mount *mnt_to,
-				  const struct mountpoint *mp)
+				  const struct mountpoint *mp,
+				  enum mnt_tree_flags_t flags)
 {
 	struct mount *parent_mnt_to = mnt_to->mnt_parent;
 
@@ -3412,14 +3415,30 @@ static int can_move_mount_beneath(const struct mount *mnt_from,
 	if (mnt_from->overmount)
 		return -EINVAL;
 
-	/*
-	 * Mounting beneath the rootfs only makes sense when the
-	 * semantics of pivot_root(".", ".") are used.
-	 */
-	if (&mnt_to->mnt == current->fs->root.mnt)
-		return -EINVAL;
-	if (parent_mnt_to == current->nsproxy->mnt_ns->root)
-		return -EINVAL;
+	if (flags & MNT_TREE_PIVOT_ROOT) {
+		if (&mnt_to->mnt != current->fs->root.mnt)
+			return -EINVAL;
+		/*
+		 * If the caller is chroot()ed let them use pivot_root()
+		 * otherwise we'd have to do pointless gymnastics.
+		 */
+		if (mnt_to->mnt.mnt_root != current->fs->root.dentry)
+			return -EINVAL;
+		/*
+		 * Note that if we know that mnt_to->mnt equals
+		 * current->fs->root.mnt we also know that @mnt_to is an
+		 * attached mount.
+		 */
+	} else {
+		/*
+		 * Mounting beneath the rootfs only makes sense when the
+		 * semantics of MNT_TREE_PIVOT_ROOT are used.
+		 */
+		if (&mnt_to->mnt == current->fs->root.mnt)
+			return -EINVAL;
+		if (parent_mnt_to == current->nsproxy->mnt_ns->root)
+			return -EINVAL;
+	}
 
 	if (mount_is_ancestor(mnt_to, mnt_from))
 		return -EINVAL;
@@ -3505,6 +3524,7 @@ static int do_move_mount(const struct path *old_path,
 			 enum mnt_tree_flags_t flags)
 {
 	struct mount *old = real_mount(old_path->mnt);
+	struct mount *over;
 	int err;
 	bool beneath = flags & MNT_TREE_BENEATH;
 
@@ -3551,11 +3571,11 @@ static int do_move_mount(const struct path *old_path,
 	}
 
 	if (beneath) {
-		struct mount *over = real_mount(new_path->mnt);
+		over = real_mount(new_path->mnt);
 
 		if (mp.parent != over->mnt_parent)
 			over = mp.parent->overmount;
-		err = can_move_mount_beneath(old, over, mp.mp);
+		err = can_move_mount_beneath(old, over, mp.mp, flags);
 		if (err)
 			return err;
 	}
@@ -3571,7 +3591,19 @@ static int do_move_mount(const struct path *old_path,
 	if (mount_is_ancestor(old, mp.parent))
 		return -ELOOP;
 
-	return attach_recursive_mnt(old, &mp);
+	err = attach_recursive_mnt(old, &mp);
+	if (err)
+		return err;
+
+	if (flags & MNT_TREE_PIVOT_ROOT) {
+		struct path prev_root = {
+			.mnt	= &over->mnt,
+			.dentry = over->mnt.mnt_root,
+		};
+		chroot_fs_refs(&prev_root, old_path);
+	}
+
+	return 0;
 }
 
 static int do_move_mount_old(const struct path *path, const char *old_name)
@@ -4419,8 +4451,13 @@ SYSCALL_DEFINE5(move_mount,
 	    (MOVE_MOUNT_BENEATH | MOVE_MOUNT_SET_GROUP))
 		return -EINVAL;
 
+	if ((flags & (MOVE_MOUNT_PIVOT_ROOT | MOVE_MOUNT_BENEATH)) ==
+	    MOVE_MOUNT_PIVOT_ROOT)
+		return -EINVAL;
+
 	if (flags & MOVE_MOUNT_SET_GROUP)	mflags |= MNT_TREE_PROPAGATION;
 	if (flags & MOVE_MOUNT_BENEATH)		mflags |= MNT_TREE_BENEATH;
+	if (flags & MOVE_MOUNT_PIVOT_ROOT)	mflags |= MNT_TREE_PIVOT_ROOT;
 
 	uflags = 0;
 	if (flags & MOVE_MOUNT_T_EMPTY_PATH)

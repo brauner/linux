@@ -75,7 +75,8 @@
 #define MOVE_MOUNT_T_EMPTY_PATH		0x00000040 /* Empty to path permitted */
 #define MOVE_MOUNT_SET_GROUP		0x00000100 /* Set sharing group instead */
 #define MOVE_MOUNT_BENEATH		0x00000200 /* Mount beneath top mount */
-#define MOVE_MOUNT__MASK		0x00000377
+#define MOVE_MOUNT_PIVOT_ROOT		0x00000400 /* Pivot to new root mount after MOVE_MOUNT_BENEATH */
+#define MOVE_MOUNT__MASK		0x00000777
 
 /*
  * fsopen() flags.
