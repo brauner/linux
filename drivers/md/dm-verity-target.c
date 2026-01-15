@@ -1803,7 +1803,25 @@ static struct target_type verity_target = {
 	.preresume	= verity_preresume,
 #endif /* CONFIG_SECURITY */
 };
-module_dm(verity);
+
+static int __init dm_verity_init(void)
+{
+	int r;
+
+	r = dm_verity_verify_sig_init();
+	if (r)
+		return r;
+
+	return dm_register_target(&verity_target);
+}
+module_init(dm_verity_init);
+
+static void __exit dm_verity_exit(void)
+{
+	dm_unregister_target(&verity_target);
+	dm_verity_verify_sig_exit();
+}
+module_exit(dm_verity_exit);
 
 /*
  * Check whether a DM target is a verity target.
