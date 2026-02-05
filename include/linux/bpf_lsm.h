@@ -11,6 +11,7 @@
 #include <linux/bpf.h>
 #include <linux/bpf_verifier.h>
 #include <linux/lsm_hooks.h>
+#include <linux/ns/ns_common_types.h>
 
 #ifdef CONFIG_BPF_LSM
 
@@ -43,6 +44,16 @@ static inline struct bpf_storage_blob *bpf_inode(
 extern const struct bpf_func_proto bpf_inode_storage_get_proto;
 extern const struct bpf_func_proto bpf_inode_storage_delete_proto;
 void bpf_inode_storage_free(struct inode *inode);
+
+static inline struct bpf_storage_blob *bpf_ns(const struct ns_common *ns)
+{
+	if (unlikely(!ns->ns_security))
+		return NULL;
+
+	return ns->ns_security + bpf_lsm_blob_sizes.lbs_ns;
+}
+
+void bpf_ns_storage_free(struct ns_common *ns);
 
 void bpf_lsm_find_cgroup_shim(const struct bpf_prog *prog, bpf_func_t *bpf_func);
 
@@ -78,6 +89,15 @@ static inline struct bpf_storage_blob *bpf_inode(
 }
 
 static inline void bpf_inode_storage_free(struct inode *inode)
+{
+}
+
+static inline struct bpf_storage_blob *bpf_ns(const struct ns_common *ns)
+{
+	return NULL;
+}
+
+static inline void bpf_ns_storage_free(struct ns_common *ns)
 {
 }
 

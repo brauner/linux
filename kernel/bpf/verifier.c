@@ -10150,6 +10150,10 @@ static int check_map_func_compatibility(struct bpf_verifier_env *env,
 		    func_id != BPF_FUNC_kptr_xchg)
 			goto error;
 		break;
+	case BPF_MAP_TYPE_NS_STORAGE:
+		if (func_id != BPF_FUNC_kptr_xchg)
+			goto error;
+		break;
 	case BPF_MAP_TYPE_BLOOM_FILTER:
 		if (func_id != BPF_FUNC_map_peek_elem &&
 		    func_id != BPF_FUNC_map_push_elem)
@@ -12385,6 +12389,7 @@ enum special_kfunc_type {
 	KF___bpf_trap,
 	KF_bpf_task_work_schedule_signal_impl,
 	KF_bpf_task_work_schedule_resume_impl,
+	KF_bpf_ns_storage_get,
 };
 
 BTF_ID_LIST(special_kfunc_list)
@@ -12459,6 +12464,11 @@ BTF_ID(func, bpf_dynptr_file_discard)
 BTF_ID(func, __bpf_trap)
 BTF_ID(func, bpf_task_work_schedule_signal_impl)
 BTF_ID(func, bpf_task_work_schedule_resume_impl)
+#ifdef CONFIG_BPF_LSM
+BTF_ID(func, bpf_ns_storage_get)
+#else
+BTF_ID_UNUSED
+#endif
 
 static bool is_task_work_add_kfunc(u32 func_id)
 {
@@ -13914,6 +13924,23 @@ static int check_special_kfunc(struct bpf_verifier_env *env, struct bpf_kfunc_ca
 		 * because packet slices are not refcounted (see
 		 * dynptr_type_refcounted)
 		 */
+	} else if (meta->func_id == special_kfunc_list[KF_bpf_ns_storage_get]) {
+		struct bpf_map *map = meta->map.ptr;
+
+		if (!map) {
+			verbose(env, "bpf_ns_storage_get: map pointer not found\n");
+			return -EINVAL;
+		}
+
+		if (map->map_type != BPF_MAP_TYPE_NS_STORAGE) {
+			verbose(env, "bpf_ns_storage_get requires NS_STORAGE map, got %d\n",
+				map->map_type);
+			return -EINVAL;
+		}
+
+		mark_reg_known_zero(env, regs, BPF_REG_0);
+		regs[BPF_REG_0].type = PTR_TO_MAP_VALUE;
+		regs[BPF_REG_0].map_ptr = map;
 	} else {
 		return 0;
 	}
@@ -20928,6 +20955,7 @@ static int check_map_prog_compatibility(struct bpf_verifier_env *env,
 		case BPF_MAP_TYPE_RINGBUF:
 		case BPF_MAP_TYPE_USER_RINGBUF:
 		case BPF_MAP_TYPE_INODE_STORAGE:
+		case BPF_MAP_TYPE_NS_STORAGE:
 		case BPF_MAP_TYPE_SK_STORAGE:
 		case BPF_MAP_TYPE_TASK_STORAGE:
 		case BPF_MAP_TYPE_CGRP_STORAGE:

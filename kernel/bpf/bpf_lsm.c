@@ -343,6 +343,7 @@ BTF_ID(func, bpf_lsm_path_chown)
 #endif /* CONFIG_SECURITY_PATH */
 
 BTF_ID(func, bpf_lsm_mmap_file)
+BTF_ID(func, bpf_lsm_namespace_alloc)
 BTF_ID(func, bpf_lsm_netlink_send)
 BTF_ID(func, bpf_lsm_path_notify)
 BTF_ID(func, bpf_lsm_release_secctx)
@@ -394,6 +395,7 @@ BTF_ID(func, bpf_lsm_sk_alloc_security)
 BTF_ID(func, bpf_lsm_sk_free_security)
 #endif /* CONFIG_SECURITY_NETWORK */
 BTF_ID(func, bpf_lsm_task_free)
+BTF_ID(func, bpf_lsm_namespace_free)
 BTF_SET_END(untrusted_lsm_hooks)
 
 bool bpf_lsm_is_sleepable_hook(u32 btf_id)

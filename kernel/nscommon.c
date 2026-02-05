@@ -82,12 +82,6 @@ int __ns_common_init(struct ns_common *ns, u32 ns_type, const struct proc_ns_ope
 	if (ret)
 		return ret;
 
-	ret = security_namespace_alloc(ns);
-	if (ret) {
-		proc_free_inum(ns->inum);
-		return ret;
-	}
-
 	/*
 	 * Tree ref starts at 0. It's incremented when namespace enters
 	 * active use (installed in nsproxy) and decremented when all
@@ -97,6 +91,13 @@ int __ns_common_init(struct ns_common *ns, u32 ns_type, const struct proc_ns_ope
 		atomic_set(&ns->__ns_ref_active, 1);
 	else
 		atomic_set(&ns->__ns_ref_active, 0);
+
+	ret = security_namespace_alloc(ns);
+	if (ret) {
+		proc_free_inum(ns->inum);
+		return ret;
+	}
+
 	return 0;
 }
 
