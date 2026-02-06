@@ -10,6 +10,7 @@
 #include <linux/sched.h>
 #include <linux/bpf.h>
 #include <linux/bpf_verifier.h>
+#include <linux/blk_types.h>
 #include <linux/lsm_hooks.h>
 
 #ifdef CONFIG_BPF_LSM
@@ -43,6 +44,17 @@ static inline struct bpf_storage_blob *bpf_inode(
 extern const struct bpf_func_proto bpf_inode_storage_get_proto;
 extern const struct bpf_func_proto bpf_inode_storage_delete_proto;
 void bpf_inode_storage_free(struct inode *inode);
+
+static inline struct bpf_storage_blob *bpf_bdev(
+	const struct block_device *bdev)
+{
+	if (unlikely(!bdev->bd_security))
+		return NULL;
+
+	return bdev->bd_security + bpf_lsm_blob_sizes.lbs_bdev;
+}
+
+void bpf_bdev_storage_free(struct block_device *bdev);
 
 void bpf_lsm_find_cgroup_shim(const struct bpf_prog *prog, bpf_func_t *bpf_func);
 
@@ -78,6 +90,16 @@ static inline struct bpf_storage_blob *bpf_inode(
 }
 
 static inline void bpf_inode_storage_free(struct inode *inode)
+{
+}
+
+static inline struct bpf_storage_blob *bpf_bdev(
+	const struct block_device *bdev)
+{
+	return NULL;
+}
+
+static inline void bpf_bdev_storage_free(struct block_device *bdev)
 {
 }
 

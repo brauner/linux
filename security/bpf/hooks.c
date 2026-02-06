@@ -13,6 +13,7 @@ static struct security_hook_list bpf_lsm_hooks[] __ro_after_init = {
 	#include <linux/lsm_hook_defs.h>
 	#undef LSM_HOOK
 	LSM_HOOK_INIT(inode_free_security, bpf_inode_storage_free),
+	LSM_HOOK_INIT(bdev_free_security, bpf_bdev_storage_free),
 };
 
 static const struct lsm_id bpf_lsmid = {
@@ -30,6 +31,7 @@ static int __init bpf_lsm_init(void)
 
 struct lsm_blob_sizes bpf_lsm_blob_sizes __ro_after_init = {
 	.lbs_inode = sizeof(struct bpf_storage_blob),
+	.lbs_bdev = sizeof(struct bpf_storage_blob),
 };
 
 DEFINE_LSM(bpf) = {
