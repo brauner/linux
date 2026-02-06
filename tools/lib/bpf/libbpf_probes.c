@@ -273,6 +273,8 @@ static int load_local_storage_btf(void)
 		BTF_TYPE_ENC(15, BTF_INFO_ENC(BTF_KIND_STRUCT, 0, 2), 8),
 		BTF_MEMBER_ENC(19, 1, 0), /* int cnt; */
 		BTF_MEMBER_ENC(23, 2, 32),/* struct bpf_spin_lock l; */
+		/* unsigned long long */                        /* [4] */
+		BTF_TYPE_INT_ENC(0, 0, 0, 64, 8),
 	};
 
 	return libbpf__load_raw_btf((char *)types, sizeof(types),
@@ -315,6 +317,17 @@ static int probe_map_create(enum bpf_map_type map_type)
 	case BPF_MAP_TYPE_CGRP_STORAGE:
 		btf_key_type_id = 1;
 		btf_value_type_id = 3;
+		value_size = 8;
+		max_entries = 0;
+		opts.map_flags = BPF_F_NO_PREALLOC;
+		btf_fd = load_local_storage_btf();
+		if (btf_fd < 0)
+			return btf_fd;
+		break;
+	case BPF_MAP_TYPE_NS_STORAGE:
+		btf_key_type_id = 4;
+		btf_value_type_id = 3;
+		key_size = sizeof(__u64);
 		value_size = 8;
 		max_entries = 0;
 		opts.map_flags = BPF_F_NO_PREALLOC;
