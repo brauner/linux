@@ -861,6 +861,7 @@ void nfs_setattr_update_inode(struct inode *inode, struct iattr *attr,
 	}
 	if ((attr->ia_valid & (ATTR_MODE|ATTR_UID|ATTR_GID)) != 0) {
 		NFS_I(inode)->cache_validity &= ~NFS_INO_INVALID_CTIME;
+		write_seqcount_begin(&inode->i_attr_seq);
 		if ((attr->ia_valid & ATTR_KILL_SUID) != 0 &&
 		    inode->i_mode & S_ISUID)
 			inode->i_mode &= ~S_ISUID;
@@ -875,6 +876,7 @@ void nfs_setattr_update_inode(struct inode *inode, struct iattr *attr,
 			inode->i_uid = attr->ia_uid;
 		if ((attr->ia_valid & ATTR_GID) != 0)
 			inode->i_gid = attr->ia_gid;
+		write_seqcount_end(&inode->i_attr_seq);
 		if (fattr->valid & NFS_ATTR_FATTR_CTIME)
 			inode_set_ctime_to_ts(inode, fattr->ctime);
 		else
@@ -2424,6 +2426,7 @@ static int nfs_update_inode(struct inode *inode, struct nfs_fattr *fattr)
 		nfsi->cache_validity |=
 			save_cache_validity & NFS_INO_INVALID_ATIME;
 
+	write_seqcount_begin(&inode->i_attr_seq);
 	if (fattr->valid & NFS_ATTR_FATTR_MODE) {
 		if ((inode->i_mode & S_IALLUGO) != (fattr->mode & S_IALLUGO)) {
 			umode_t newmode = inode->i_mode & S_IFMT;
@@ -2455,6 +2458,7 @@ static int nfs_update_inode(struct inode *inode, struct nfs_fattr *fattr)
 	} else if (fattr_supported & NFS_ATTR_FATTR_GROUP)
 		nfsi->cache_validity |=
 			save_cache_validity & NFS_INO_INVALID_OTHER;
+	write_seqcount_end(&inode->i_attr_seq);
 
 	if (fattr->valid & NFS_ATTR_FATTR_NLINK) {
 		if (inode->i_nlink != fattr->nlink)
