@@ -46,7 +46,9 @@ static void ksmbd_vfs_inherit_owner(struct ksmbd_work *work,
 				    KSMBD_SHARE_FLAG_INHERIT_OWNER))
 		return;
 
+	inode_attr_begin(inode);
 	i_uid_write(inode, i_uid_read(parent_inode));
+	inode_attr_end(inode);
 }
 
 static int ksmbd_vfs_path_lookup(struct ksmbd_share_config *share_conf,
