@@ -249,10 +249,11 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	fi->i_time = attr_valid;
 
 	inode->i_ino     = fuse_squash_ino(attr->ino);
-	inode->i_mode    = (inode->i_mode & S_IFMT) | (attr->mode & 07777);
+	inode_update_permissions(inode,
+				(inode->i_mode & S_IFMT) | (attr->mode & 07777),
+				make_kuid(fc->user_ns, attr->uid),
+				make_kgid(fc->user_ns, attr->gid));
 	set_nlink(inode, attr->nlink);
-	inode->i_uid     = make_kuid(fc->user_ns, attr->uid);
-	inode->i_gid     = make_kgid(fc->user_ns, attr->gid);
 	inode->i_blocks  = attr->blocks;
 
 	/* Sanitize nsecs */
