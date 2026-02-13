@@ -279,6 +279,7 @@ static void afs_apply_status(struct afs_operation *op,
 	if (status->nlink != vnode->status.nlink)
 		set_nlink(inode, status->nlink);
 
+	inode_attr_begin(inode);
 	if (status->owner != vnode->status.owner)
 		inode->i_uid = make_kuid(&init_user_ns, status->owner);
 
@@ -291,6 +292,7 @@ static void afs_apply_status(struct afs_operation *op,
 		mode |= status->mode & S_IALLUGO;
 		WRITE_ONCE(inode->i_mode, mode);
 	}
+	inode_attr_end(inode);
 
 	t = status->mtime_client;
 	inode_set_mtime_to_ts(inode, t);
