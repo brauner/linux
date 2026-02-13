@@ -654,13 +654,18 @@ static noinline int ntfs_set_acl_ex(struct mnt_idmap *idmap,
 
 	if (inode->i_mode != mode) {
 		umode_t old_mode = inode->i_mode;
+
+		inode_attr_begin(inode);
 		inode->i_mode = mode;
+		inode_attr_end(inode);
+
 		err = ntfs_save_wsl_perm(inode, NULL);
 		if (err) {
+			inode_attr_begin(inode);
 			inode->i_mode = old_mode;
+			inode_attr_end(inode);
 			goto out;
 		}
-		inode->i_mode = mode;
 	}
 	set_cached_acl(inode, type, acl);
 	inode_set_ctime_current(inode);
@@ -900,10 +905,12 @@ set_new_fa:
 
 		if (ni->std_fa != new_fa) {
 			ni->std_fa = new_fa;
+			inode_attr_begin(inode);
 			if (new_fa & FILE_ATTRIBUTE_READONLY)
 				inode->i_mode &= ~0222;
 			else
 				inode->i_mode |= 0222;
+			inode_attr_end(inode);
 			/* Std attribute always in primary record. */
 			ni->mi.dirty = true;
 			mark_inode_dirty(inode);
