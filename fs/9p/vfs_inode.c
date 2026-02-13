@@ -1114,13 +1114,18 @@ v9fs_stat2inode(struct p9_wstat *stat, struct inode *inode,
 	inode_set_mtime(inode, stat->mtime, 0);
 	inode_set_ctime(inode, stat->mtime, 0);
 
+	inode_attr_begin(inode);
 	inode->i_uid = v9ses->dfltuid;
 	inode->i_gid = v9ses->dfltgid;
-
 	if (v9fs_proto_dotu(v9ses)) {
 		inode->i_uid = stat->n_uid;
 		inode->i_gid = stat->n_gid;
 	}
+	mode = p9mode2perm(v9ses, stat);
+	mode |= inode->i_mode & ~S_IALLUGO;
+	inode->i_mode = mode;
+	inode_attr_end(inode);
+
 	if ((S_ISREG(inode->i_mode)) || (S_ISDIR(inode->i_mode))) {
 		if (v9fs_proto_dotu(v9ses)) {
 			unsigned int i_nlink;
@@ -1137,9 +1142,6 @@ v9fs_stat2inode(struct p9_wstat *stat, struct inode *inode,
 				set_nlink(inode, i_nlink);
 		}
 	}
-	mode = p9mode2perm(v9ses, stat);
-	mode |= inode->i_mode & ~S_IALLUGO;
-	inode->i_mode = mode;
 
 	v9inode->netfs.remote_i_size = stat->length;
 	if (!(flags & V9FS_STAT2INODE_KEEP_ISIZE))

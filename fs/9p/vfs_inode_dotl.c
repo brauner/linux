@@ -626,13 +626,15 @@ v9fs_stat2inode_dotl(struct p9_stat_dotl *stat, struct inode *inode,
 				stat->st_mtime_nsec);
 		inode_set_ctime(inode, stat->st_ctime_sec,
 				stat->st_ctime_nsec);
+		inode_attr_begin(inode);
 		inode->i_uid = stat->st_uid;
 		inode->i_gid = stat->st_gid;
-		set_nlink(inode, stat->st_nlink);
-
 		mode = stat->st_mode & S_IALLUGO;
 		mode |= inode->i_mode & ~S_IALLUGO;
 		inode->i_mode = mode;
+		inode_attr_end(inode);
+
+		set_nlink(inode, stat->st_nlink);
 
 		v9inode->netfs.remote_i_size = stat->st_size;
 		if (!(flags & V9FS_STAT2INODE_KEEP_ISIZE))
@@ -651,17 +653,19 @@ v9fs_stat2inode_dotl(struct p9_stat_dotl *stat, struct inode *inode,
 			inode_set_ctime(inode, stat->st_ctime_sec,
 					stat->st_ctime_nsec);
 		}
+		inode_attr_begin(inode);
 		if (stat->st_result_mask & P9_STATS_UID)
 			inode->i_uid = stat->st_uid;
 		if (stat->st_result_mask & P9_STATS_GID)
 			inode->i_gid = stat->st_gid;
-		if (stat->st_result_mask & P9_STATS_NLINK)
-			set_nlink(inode, stat->st_nlink);
 		if (stat->st_result_mask & P9_STATS_MODE) {
 			mode = stat->st_mode & S_IALLUGO;
 			mode |= inode->i_mode & ~S_IALLUGO;
 			inode->i_mode = mode;
 		}
+		inode_attr_end(inode);
+		if (stat->st_result_mask & P9_STATS_NLINK)
+			set_nlink(inode, stat->st_nlink);
 		if (!(flags & V9FS_STAT2INODE_KEEP_ISIZE) &&
 		    stat->st_result_mask & P9_STATS_SIZE) {
 			v9inode->netfs.remote_i_size = stat->st_size;
