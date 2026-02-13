@@ -258,7 +258,9 @@ retry:
 
 	error = __ext4_set_acl(handle, inode, type, acl, 0 /* xattr_flags */);
 	if (!error && update_mode) {
+		inode_attr_begin(inode);
 		inode->i_mode = mode;
+		inode_attr_end(inode);
 		inode_set_ctime_current(inode);
 		error = ext4_mark_inode_dirty(handle, inode);
 	}

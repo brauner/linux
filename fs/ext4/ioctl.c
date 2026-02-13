@@ -438,8 +438,10 @@ static long swap_inode_boot_loader(struct super_block *sb,
 	if (is_bad_inode(inode_bl) || !S_ISREG(inode_bl->i_mode)) {
 		/* this inode has never been used as a BOOT_LOADER */
 		set_nlink(inode_bl, 1);
+		inode_attr_begin(inode_bl);
 		i_uid_write(inode_bl, 0);
 		i_gid_write(inode_bl, 0);
+		inode_attr_end(inode_bl);
 		inode_bl->i_flags = 0;
 		ei_bl->i_flags = 0;
 		inode_set_iversion(inode_bl, 1);

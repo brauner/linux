@@ -5872,8 +5872,10 @@ int ext4_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		}
 		/* Update corresponding info in inode so that everything is in
 		 * one transaction */
+		inode_attr_begin(inode);
 		i_uid_update(idmap, attr, inode);
 		i_gid_update(idmap, attr, inode);
+		inode_attr_end(inode);
 		error = ext4_mark_inode_dirty(handle, inode);
 		ext4_journal_stop(handle);
 		if (unlikely(error)) {
