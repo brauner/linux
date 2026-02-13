@@ -353,10 +353,17 @@ again2:
 		goto out_unlock;
 	}
 
+	write_seqcount_begin(&inode->i_attr_seq);
 	inode->i_uid = make_kuid(&init_user_ns, new_op->
 	    downcall.resp.getattr.attributes.owner);
 	inode->i_gid = make_kgid(&init_user_ns, new_op->
 	    downcall.resp.getattr.attributes.group);
+
+	/* special case: mark the root inode as sticky */
+	inode->i_mode = type | (is_root_handle(inode) ? S_ISVTX : 0) |
+	    orangefs_inode_perms(&new_op->downcall.resp.getattr.attributes);
+	write_seqcount_end(&inode->i_attr_seq);
+
 	inode_set_atime(inode,
 			(time64_t)new_op->downcall.resp.getattr.attributes.atime,
 			0);
@@ -366,10 +373,6 @@ again2:
 	inode_set_ctime(inode,
 			(time64_t)new_op->downcall.resp.getattr.attributes.ctime,
 			0);
-
-	/* special case: mark the root inode as sticky */
-	inode->i_mode = type | (is_root_handle(inode) ? S_ISVTX : 0) |
-	    orangefs_inode_perms(&new_op->downcall.resp.getattr.attributes);
 
 	orangefs_inode->getattr_time = jiffies +
 	    orangefs_getattr_timeout_msecs*HZ/1000;
