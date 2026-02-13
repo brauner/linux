@@ -73,7 +73,9 @@ xrep_chown_orphanage(
 	 * doesn't create it this way either.  Leave the other access bits
 	 * unchanged.
 	 */
+	inode_attr_begin(inode);
 	inode->i_mode &= ~(S_ISUID | S_ISGID | S_ISVTX);
+	inode_attr_end(inode);
 
 	/*
 	 * Change the ownerships and register quota modifications
@@ -82,12 +84,16 @@ xrep_chown_orphanage(
 	if (!uid_eq(inode->i_uid, GLOBAL_ROOT_UID)) {
 		if (XFS_IS_UQUOTA_ON(mp))
 			oldu = xfs_qm_vop_chown(tp, dp, &dp->i_udquot, udqp);
+		inode_attr_begin(inode);
 		inode->i_uid = GLOBAL_ROOT_UID;
+		inode_attr_end(inode);
 	}
 	if (!gid_eq(inode->i_gid, GLOBAL_ROOT_GID)) {
 		if (XFS_IS_GQUOTA_ON(mp))
 			oldg = xfs_qm_vop_chown(tp, dp, &dp->i_gdquot, gdqp);
+		inode_attr_begin(inode);
 		inode->i_gid = GLOBAL_ROOT_GID;
+		inode_attr_end(inode);
 	}
 	if (dp->i_projid != 0) {
 		if (XFS_IS_PQUOTA_ON(mp))

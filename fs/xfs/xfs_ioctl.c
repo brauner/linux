@@ -793,8 +793,11 @@ xfs_fileattr_set(
 	 */
 
 	if ((VFS_I(ip)->i_mode & (S_ISUID|S_ISGID)) &&
-	    !capable_wrt_inode_uidgid(idmap, VFS_I(ip), CAP_FSETID))
+	    !capable_wrt_inode_uidgid(idmap, VFS_I(ip), CAP_FSETID)) {
+		inode_attr_begin(VFS_I(ip));
 		VFS_I(ip)->i_mode &= ~(S_ISUID|S_ISGID);
+		inode_attr_end(VFS_I(ip));
+	}
 
 	/* Change the ownerships and register project quota modifications */
 	if (ip->i_projid != fa->fsx_projid) {

@@ -233,7 +233,9 @@ xfs_acl_set_mode(
 
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
+	inode_attr_begin(inode);
 	inode->i_mode = mode;
+	inode_attr_end(inode);
 	inode_set_ctime_current(inode);
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 

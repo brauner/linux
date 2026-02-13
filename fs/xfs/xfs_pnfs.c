@@ -91,9 +91,11 @@ xfs_fs_map_update_inode(
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
 
+	inode_attr_begin(VFS_I(ip));
 	VFS_I(ip)->i_mode &= ~S_ISUID;
 	if (VFS_I(ip)->i_mode & S_IXGRP)
 		VFS_I(ip)->i_mode &= ~S_ISGID;
+	inode_attr_end(VFS_I(ip));
 	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_MOD | XFS_ICHGTIME_CHG);
 	ip->i_diflags |= XFS_DIFLAG_PREALLOC;
 

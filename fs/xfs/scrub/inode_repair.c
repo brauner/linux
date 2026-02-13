@@ -1723,14 +1723,18 @@ xrep_inode_ids(
 	trace_xrep_inode_ids(sc);
 
 	if (!uid_valid(VFS_I(sc->ip)->i_uid)) {
+		inode_attr_begin(VFS_I(sc->ip));
 		i_uid_write(VFS_I(sc->ip), 0);
+		inode_attr_end(VFS_I(sc->ip));
 		dirty = true;
 		if (XFS_IS_UQUOTA_ON(sc->mp))
 			xrep_force_quotacheck(sc, XFS_DQTYPE_USER);
 	}
 
 	if (!gid_valid(VFS_I(sc->ip)->i_gid)) {
+		inode_attr_begin(VFS_I(sc->ip));
 		i_gid_write(VFS_I(sc->ip), 0);
+		inode_attr_end(VFS_I(sc->ip));
 		dirty = true;
 		if (XFS_IS_GQUOTA_ON(sc->mp))
 			xrep_force_quotacheck(sc, XFS_DQTYPE_GROUP);
@@ -1744,8 +1748,11 @@ xrep_inode_ids(
 	}
 
 	/* strip setuid/setgid if we touched any of the ids */
-	if (dirty)
+	if (dirty) {
+		inode_attr_begin(VFS_I(sc->ip));
 		VFS_I(sc->ip)->i_mode &= ~(S_ISUID | S_ISGID);
+		inode_attr_end(VFS_I(sc->ip));
+	}
 }
 
 static inline void
