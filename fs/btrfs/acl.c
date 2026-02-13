@@ -108,13 +108,18 @@ int btrfs_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	umode_t old_mode = inode->i_mode;
 
 	if (type == ACL_TYPE_ACCESS && acl) {
+		inode_attr_begin(inode);
 		ret = posix_acl_update_mode(idmap, inode,
 					    &inode->i_mode, &acl);
+		inode_attr_end(inode);
 		if (ret)
 			return ret;
 	}
 	ret = __btrfs_set_acl(NULL, inode, acl, type);
-	if (ret)
+	if (ret) {
+		inode_attr_begin(inode);
 		inode->i_mode = old_mode;
+		inode_attr_end(inode);
+	}
 	return ret;
 }
