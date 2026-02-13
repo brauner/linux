@@ -2588,6 +2588,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 	/* At this point we know we have a real path component. */
 	for(;;) {
 		struct mnt_idmap *idmap;
+		unsigned int seq;
 		const char *link;
 		unsigned long lastword;
 
@@ -2634,8 +2635,11 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 OK:
 			/* pathname or trailing symlink, done */
 			if (likely(!depth)) {
-				nd->dir_vfsuid = i_uid_into_vfsuid(idmap, nd->inode);
-				nd->dir_mode = nd->inode->i_mode;
+				do {
+					seq = read_seqcount_begin(&nd->inode->i_attr_seq);
+					nd->dir_vfsuid = i_uid_into_vfsuid(idmap, nd->inode);
+					nd->dir_mode = nd->inode->i_mode;
+				} while (read_seqcount_retry(&nd->inode->i_attr_seq, seq));
 				nd->flags &= ~LOOKUP_PARENT;
 				return 0;
 			}
