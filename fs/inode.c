@@ -511,6 +511,7 @@ void inode_init_once(struct inode *inode)
 	INIT_LIST_HEAD(&inode->i_sb_list);
 	__address_space_init_once(&inode->i_data);
 	i_size_ordered_init(inode);
+	seqcount_spinlock_init(&inode->i_attr_seq, &inode->i_lock);
 }
 EXPORT_SYMBOL(inode_init_once);
 

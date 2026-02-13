@@ -816,7 +816,7 @@ struct inode {
 
 	/* Misc */
 	struct inode_state_flags i_state;
-	/* 32-bit hole */
+	seqcount_spinlock_t	i_attr_seq;
 	struct rw_semaphore	i_rwsem;
 
 	unsigned long		dirtied_when;	/* jiffies of first dirtying */
@@ -1076,6 +1076,29 @@ static inline void inode_lock_nested(struct inode *inode, unsigned subclass)
 static inline void inode_lock_shared_nested(struct inode *inode, unsigned subclass)
 {
 	down_read_nested(&inode->i_rwsem, subclass);
+}
+
+static inline void inode_attr_begin(struct inode *inode)
+{
+	spin_lock(&inode->i_lock);
+	write_seqcount_begin(&inode->i_attr_seq);
+}
+
+static inline void inode_attr_end(struct inode *inode)
+{
+	write_seqcount_end(&inode->i_attr_seq);
+	spin_unlock(&inode->i_lock);
+}
+
+static inline void inode_update_permissions(struct inode *inode,
+					    umode_t mode,
+					    kuid_t uid, kgid_t gid)
+{
+	inode_attr_begin(inode);
+	inode->i_mode = mode;
+	inode->i_uid = uid;
+	inode->i_gid = gid;
+	inode_attr_end(inode);
 }
 
 static inline void filemap_invalidate_lock(struct address_space *mapping)
