@@ -403,7 +403,9 @@ static int gfs2_dinode_in(struct gfs2_inode *ip, const void *buf)
 		return -EIO;
 	}
 	ip->i_no_formal_ino = be64_to_cpu(str->di_num.no_formal_ino);
-	inode->i_mode = mode;
+	inode_update_permissions(inode, mode,
+		make_kuid(inode->i_sb->s_user_ns, be32_to_cpu(str->di_uid)),
+		make_kgid(inode->i_sb->s_user_ns, be32_to_cpu(str->di_gid)));
 	if (is_new) {
 		inode->i_rdev = 0;
 		switch (mode & S_IFMT) {
@@ -415,8 +417,6 @@ static int gfs2_dinode_in(struct gfs2_inode *ip, const void *buf)
 		}
 	}
 
-	i_uid_write(inode, be32_to_cpu(str->di_uid));
-	i_gid_write(inode, be32_to_cpu(str->di_gid));
 	set_nlink(inode, be32_to_cpu(str->di_nlink));
 	i_size_write(inode, be64_to_cpu(str->di_size));
 	gfs2_set_inode_blocks(inode, be64_to_cpu(str->di_blocks));
