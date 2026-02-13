@@ -108,14 +108,16 @@ void coda_vattr_to_iattr(struct inode *inode, struct coda_vattr *attr)
 	 * XXX: is this all we need ??
 	 */
 	umode_t inode_type = coda_inode_type(attr);
-	inode->i_mode |= inode_type;
 
+	inode_attr_begin(inode);
+	inode->i_mode |= inode_type;
 	if (attr->va_mode != (u_short) -1)
 	        inode->i_mode = attr->va_mode | inode_type;
-        if (attr->va_uid != -1) 
+        if (attr->va_uid != -1)
 	        inode->i_uid = make_kuid(&init_user_ns, (uid_t) attr->va_uid);
         if (attr->va_gid != -1)
 	        inode->i_gid = make_kgid(&init_user_ns, (gid_t) attr->va_gid);
+	inode_attr_end(inode);
 	if (attr->va_nlink != -1)
 		set_nlink(inode, attr->va_nlink);
 	if (attr->va_size != -1)

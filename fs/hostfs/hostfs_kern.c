@@ -500,8 +500,10 @@ static const struct address_space_operations hostfs_aops = {
 static int hostfs_inode_update(struct inode *ino, const struct hostfs_stat *st)
 {
 	set_nlink(ino, st->nlink);
+	inode_attr_begin(ino);
 	i_uid_write(ino, st->uid);
 	i_gid_write(ino, st->gid);
+	inode_attr_end(ino);
 	inode_set_atime_to_ts(ino, (struct timespec64){
 			st->atime.tv_sec,
 			st->atime.tv_nsec,

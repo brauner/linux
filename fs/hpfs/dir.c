@@ -288,8 +288,11 @@ struct dentry *hpfs_lookup(struct inode *dir, struct dentry *dentry, unsigned in
 				local_to_gmt(dir->i_sb, le32_to_cpu(de->read_date)),
 				0);
 		hpfs_result->i_ea_size = le32_to_cpu(de->ea_size);
-		if (!hpfs_result->i_ea_mode && de->read_only)
+		if (!hpfs_result->i_ea_mode && de->read_only) {
+			inode_attr_begin(result);
 			result->i_mode &= ~0222;
+			inode_attr_end(result);
+		}
 		if (!de->directory) {
 			if (result->i_size == -1) {
 				result->i_size = le32_to_cpu(de->file_size);

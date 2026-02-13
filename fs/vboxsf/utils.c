@@ -90,7 +90,6 @@ int vboxsf_init_inode(struct vboxsf_sbi *sbi, struct inode *inode,
 			set_nlink(inode, 1);
 		} else if (!S_ISDIR(inode->i_mode))
 			return -ESTALE;
-		inode->i_mode = mode;
 	} else if (SHFL_IS_SYMLINK(attr->mode)) {
 		if (sbi->o.fmode_set)
 			mode = sbi->o.fmode;
@@ -101,7 +100,6 @@ int vboxsf_init_inode(struct vboxsf_sbi *sbi, struct inode *inode,
 			set_nlink(inode, 1);
 		} else if (!S_ISLNK(inode->i_mode))
 			return -ESTALE;
-		inode->i_mode = mode;
 	} else {
 		if (sbi->o.fmode_set)
 			mode = sbi->o.fmode;
@@ -113,11 +111,15 @@ int vboxsf_init_inode(struct vboxsf_sbi *sbi, struct inode *inode,
 			set_nlink(inode, 1);
 		} else if (!S_ISREG(inode->i_mode))
 			return -ESTALE;
-		inode->i_mode = mode;
 	}
 
+	if (reinit)
+		inode_attr_begin(inode);
+	inode->i_mode = mode;
 	inode->i_uid = sbi->o.uid;
 	inode->i_gid = sbi->o.gid;
+	if (reinit)
+		inode_attr_end(inode);
 
 	inode->i_size = info->size;
 	inode->i_blkbits = 12;

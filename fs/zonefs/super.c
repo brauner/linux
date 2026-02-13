@@ -233,14 +233,18 @@ static void zonefs_inode_update_mode(struct inode *inode)
 	if (z->z_flags & ZONEFS_ZONE_OFFLINE) {
 		/* Offline zones cannot be read nor written */
 		inode->i_flags |= S_IMMUTABLE;
+		inode_attr_begin(inode);
 		inode->i_mode &= ~0777;
+		inode_attr_end(inode);
 	} else if (z->z_flags & ZONEFS_ZONE_READONLY) {
 		/* Readonly zones cannot be written */
 		inode->i_flags |= S_IMMUTABLE;
+		inode_attr_begin(inode);
 		if (z->z_flags & ZONEFS_ZONE_INIT_MODE)
 			inode->i_mode &= ~0777;
 		else
 			inode->i_mode &= ~0222;
+		inode_attr_end(inode);
 	}
 
 	z->z_flags &= ~ZONEFS_ZONE_INIT_MODE;
