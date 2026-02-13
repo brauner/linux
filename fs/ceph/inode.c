@@ -2910,7 +2910,7 @@ int ceph_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	err = __ceph_setattr(idmap, inode, attr, NULL);
 
 	if (err >= 0 && (attr->ia_valid & ATTR_MODE))
-		err = posix_acl_chmod(idmap, dentry, attr->ia_mode);
+		err = posix_acl_chmod(idmap, dentry, inode->i_mode);
 
 	return err;
 }
