@@ -1037,8 +1037,10 @@ static void __setattr_copy(struct mnt_idmap *idmap,
 {
 	unsigned int ia_valid = attr->ia_valid;
 
+	inode_attr_begin(inode);
 	i_uid_update(idmap, attr, inode);
 	i_gid_update(idmap, attr, inode);
+	inode_attr_end(inode);
 	if (ia_valid & ATTR_ATIME)
 		inode_set_atime_to_ts(inode, attr->ia_atime);
 	if (ia_valid & ATTR_MTIME)
@@ -1127,8 +1129,10 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		 * update uid/gid under lock_op(), so that dquot and inode can
 		 * be updated atomically.
 		 */
+		inode_attr_begin(inode);
 		i_uid_update(idmap, attr, inode);
 		i_gid_update(idmap, attr, inode);
+		inode_attr_end(inode);
 		f2fs_mark_inode_dirty_sync(inode, true);
 		f2fs_unlock_op(sbi);
 	}
@@ -1183,8 +1187,11 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		err = posix_acl_chmod(idmap, dentry, f2fs_get_inode_mode(inode));
 
 		if (is_inode_flag_set(inode, FI_ACL_MODE)) {
-			if (!err)
+			if (!err) {
+				inode_attr_begin(inode);
 				inode->i_mode = fi->i_acl_mode;
+				inode_attr_end(inode);
+			}
 			clear_inode_flag(inode, FI_ACL_MODE);
 		}
 	}

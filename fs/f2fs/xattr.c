@@ -788,7 +788,9 @@ retry:
 		f2fs_add_ino_entry(sbi, inode->i_ino, XATTR_DIR_INO);
 same:
 	if (is_inode_flag_set(inode, FI_ACL_MODE)) {
+		inode_attr_begin(inode);
 		inode->i_mode = F2FS_I(inode)->i_acl_mode;
+		inode_attr_end(inode);
 		clear_inode_flag(inode, FI_ACL_MODE);
 	}
 
