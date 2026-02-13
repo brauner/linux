@@ -3573,6 +3573,7 @@ static void handle_cap_grant(struct inode *inode,
 	    (extra_info->issued & CEPH_CAP_AUTH_EXCL) == 0) {
 		umode_t mode = le32_to_cpu(grant->mode);
 
+		inode_attr_begin(inode);
 		if (inode_wrong_type(inode, mode))
 			pr_warn_once("inode type changed! (ino %llx.%llx is 0%o, mds says 0%o)\n",
 				     ceph_vinop(inode), inode->i_mode, mode);
@@ -3580,6 +3581,7 @@ static void handle_cap_grant(struct inode *inode,
 			inode->i_mode = mode;
 		inode->i_uid = make_kuid(&init_user_ns, le32_to_cpu(grant->uid));
 		inode->i_gid = make_kgid(&init_user_ns, le32_to_cpu(grant->gid));
+		inode_attr_end(inode);
 		ci->i_btime = extra_info->btime;
 		doutc(cl, "%p %llx.%llx mode 0%o uid.gid %d.%d\n", inode,
 		      ceph_vinop(inode), inode->i_mode,

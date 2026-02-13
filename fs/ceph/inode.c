@@ -1091,9 +1091,9 @@ int ceph_fill_inode(struct inode *inode, struct page *locked_page,
 
 	if ((new_version || (new_issued & CEPH_CAP_AUTH_SHARED)) &&
 	    (issued & CEPH_CAP_AUTH_EXCL) == 0) {
-		inode->i_mode = mode;
-		inode->i_uid = make_kuid(&init_user_ns, le32_to_cpu(info->uid));
-		inode->i_gid = make_kgid(&init_user_ns, le32_to_cpu(info->gid));
+		inode_update_permissions(inode, mode,
+			make_kuid(&init_user_ns, le32_to_cpu(info->uid)),
+			make_kgid(&init_user_ns, le32_to_cpu(info->gid)));
 		doutc(cl, "%p %llx.%llx mode 0%o uid.gid %d.%d\n", inode,
 		      ceph_vinop(inode), inode->i_mode,
 		      from_kuid(&init_user_ns, inode->i_uid),
@@ -2638,6 +2638,7 @@ retry:
 	}
 #endif /* CONFIG_FS_ENCRYPTION */
 
+	inode_attr_begin(inode);
 	if (ia_valid & ATTR_UID) {
 		kuid_t fsuid = from_vfsuid(idmap, i_user_ns(inode), attr->ia_vfsuid);
 
@@ -2688,6 +2689,7 @@ retry:
 			release |= CEPH_CAP_AUTH_SHARED;
 		}
 	}
+	inode_attr_end(inode);
 
 	if (ia_valid & ATTR_ATIME) {
 		struct timespec64 atime = inode_get_atime(inode);
