@@ -1020,10 +1020,14 @@ int simple_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	struct inode *inode = d_inode(dentry);
 
 	if (type == ACL_TYPE_ACCESS) {
-		error = posix_acl_update_mode(idmap, inode,
-				&inode->i_mode, &acl);
+		umode_t mode;
+
+		error = posix_acl_update_mode(idmap, inode, &mode, &acl);
 		if (error)
 			return error;
+		inode_attr_begin(inode);
+		inode->i_mode = mode;
+		inode_attr_end(inode);
 	}
 
 	inode_set_ctime_current(inode);

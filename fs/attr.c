@@ -334,6 +334,9 @@ void setattr_copy(struct mnt_idmap *idmap, struct inode *inode,
 {
 	unsigned int ia_valid = attr->ia_valid;
 
+	if (ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID))
+		inode_attr_begin(inode);
+
 	i_uid_update(idmap, attr, inode);
 	i_gid_update(idmap, attr, inode);
 	if (ia_valid & ATTR_MODE) {
@@ -343,6 +346,9 @@ void setattr_copy(struct mnt_idmap *idmap, struct inode *inode,
 			mode &= ~S_ISGID;
 		inode->i_mode = mode;
 	}
+
+	if (ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID))
+		inode_attr_end(inode);
 
 	if (is_mgtime(inode))
 		return setattr_copy_mgtime(inode, attr);

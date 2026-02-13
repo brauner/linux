@@ -62,9 +62,7 @@ EXPORT_SYMBOL_GPL(fsstack_copy_inode_size);
 /* copy all attributes */
 void fsstack_copy_attr_all(struct inode *dest, const struct inode *src)
 {
-	dest->i_mode = src->i_mode;
-	dest->i_uid = src->i_uid;
-	dest->i_gid = src->i_gid;
+	inode_update_permissions(dest, src->i_mode, src->i_uid, src->i_gid);
 	dest->i_rdev = src->i_rdev;
 	inode_set_atime_to_ts(dest, inode_get_atime(src));
 	inode_set_mtime_to_ts(dest, inode_get_mtime(src));
