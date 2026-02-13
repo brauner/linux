@@ -301,7 +301,11 @@ static int mknod_ptmx(struct super_block *sb, struct fs_context *fc)
 
 static void update_ptmx_mode(struct pts_fs_info *fsi)
 {
-	fsi->ptmx_inode->i_mode = S_IFCHR|fsi->mount_opts.ptmxmode;
+	struct inode *inode = fsi->ptmx_inode;
+
+	inode_attr_begin(inode);
+	inode->i_mode = S_IFCHR|fsi->mount_opts.ptmxmode;
+	inode_attr_end(inode);
 }
 
 static int devpts_reconfigure(struct fs_context *fc)

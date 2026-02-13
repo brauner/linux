@@ -155,6 +155,7 @@ static void _debugfs_apply_options(struct super_block *sb, bool remount)
 	 * options.
 	 */
 
+	inode_attr_begin(inode);
 	if (!remount || fsi->opts & BIT(Opt_mode)) {
 		inode->i_mode &= ~S_IALLUGO;
 		inode->i_mode |= fsi->mode;
@@ -165,6 +166,7 @@ static void _debugfs_apply_options(struct super_block *sb, bool remount)
 
 	if (!remount || fsi->opts & BIT(Opt_gid))
 		inode->i_gid = fsi->gid;
+	inode_attr_end(inode);
 }
 
 static void debugfs_apply_options(struct super_block *sb)

@@ -93,9 +93,8 @@ static inline void set_default_inode_attr(struct inode * inode, umode_t mode)
 
 static inline void set_inode_attr(struct inode * inode, struct iattr * iattr)
 {
-	inode->i_mode = iattr->ia_mode;
-	inode->i_uid = iattr->ia_uid;
-	inode->i_gid = iattr->ia_gid;
+	inode_update_permissions(inode, iattr->ia_mode, iattr->ia_uid,
+				 iattr->ia_gid);
 	inode_set_atime_to_ts(inode, iattr->ia_atime);
 	inode_set_mtime_to_ts(inode, iattr->ia_mtime);
 	inode_set_ctime_to_ts(inode, iattr->ia_ctime);

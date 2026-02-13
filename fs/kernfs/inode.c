@@ -155,28 +155,28 @@ static inline void set_default_inode_attr(struct inode *inode, umode_t mode)
 	simple_inode_init_ts(inode);
 }
 
-static inline void set_inode_attr(struct inode *inode,
-				  struct kernfs_iattrs *attrs)
-{
-	inode->i_uid = attrs->ia_uid;
-	inode->i_gid = attrs->ia_gid;
-	inode_set_atime_to_ts(inode, attrs->ia_atime);
-	inode_set_mtime_to_ts(inode, attrs->ia_mtime);
-	inode_set_ctime_to_ts(inode, attrs->ia_ctime);
-}
-
 static void kernfs_refresh_inode(struct kernfs_node *kn, struct inode *inode)
 {
 	struct kernfs_iattrs *attrs;
 
+	inode_attr_begin(inode);
 	inode->i_mode = kn->mode;
 	attrs = kernfs_iattrs_noalloc(kn);
-	if (attrs)
+	if (attrs) {
 		/*
 		 * kernfs_node has non-default attributes get them from
 		 * persistent copy in kernfs_node.
 		 */
-		set_inode_attr(inode, attrs);
+		inode->i_uid = attrs->ia_uid;
+		inode->i_gid = attrs->ia_gid;
+	}
+	inode_attr_end(inode);
+
+	if (attrs) {
+		inode_set_atime_to_ts(inode, attrs->ia_atime);
+		inode_set_mtime_to_ts(inode, attrs->ia_mtime);
+		inode_set_ctime_to_ts(inode, attrs->ia_ctime);
+	}
 
 	if (kernfs_type(kn) == KERNFS_DIR)
 		set_nlink(inode, kn->dir.subdirs + 2);

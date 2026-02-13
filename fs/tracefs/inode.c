@@ -205,11 +205,13 @@ static void set_tracefs_inode_owner(struct inode *inode)
 	 * If this inode has never been referenced, then update
 	 * the permissions to the superblock.
 	 */
+	inode_attr_begin(inode);
 	if (!(ti->flags & TRACEFS_UID_PERM_SET))
 		inode->i_uid = uid;
 
 	if (!(ti->flags & TRACEFS_GID_PERM_SET))
 		inode->i_gid = gid;
+	inode_attr_end(inode);
 }
 
 static int tracefs_permission(struct mnt_idmap *idmap,
@@ -362,6 +364,7 @@ static int tracefs_apply_options(struct super_block *sb, bool remount)
 
 		rcu_read_lock();
 		list_for_each_entry_rcu(ti, &tracefs_inodes, list) {
+			inode_attr_begin(&ti->vfs_inode);
 			if (update_uid) {
 				ti->flags &= ~TRACEFS_UID_PERM_SET;
 				ti->vfs_inode.i_uid = fsi->uid;
@@ -371,6 +374,7 @@ static int tracefs_apply_options(struct super_block *sb, bool remount)
 				ti->flags &= ~TRACEFS_GID_PERM_SET;
 				ti->vfs_inode.i_gid = fsi->gid;
 			}
+			inode_attr_end(&ti->vfs_inode);
 
 			/*
 			 * Note, the above ti->vfs_inode updates are
