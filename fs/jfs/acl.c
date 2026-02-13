@@ -110,7 +110,9 @@ int jfs_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 	rc = __jfs_set_acl(tid, inode, type, acl);
 	if (!rc) {
 		if (update_mode) {
+			inode_attr_begin(inode);
 			inode->i_mode = mode;
+			inode_attr_end(inode);
 			inode_set_ctime_current(inode);
 			mark_inode_dirty(inode);
 		}

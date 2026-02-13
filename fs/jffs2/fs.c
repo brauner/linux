@@ -150,9 +150,9 @@ int jffs2_do_setattr (struct inode *inode, struct iattr *iattr)
 	inode_set_atime_to_ts(inode, ITIME(je32_to_cpu(ri->atime)));
 	inode_set_ctime_to_ts(inode, ITIME(je32_to_cpu(ri->ctime)));
 	inode_set_mtime_to_ts(inode, ITIME(je32_to_cpu(ri->mtime)));
-	inode->i_mode = jemode_to_cpu(ri->mode);
-	i_uid_write(inode, je16_to_cpu(ri->uid));
-	i_gid_write(inode, je16_to_cpu(ri->gid));
+	inode_update_permissions(inode, jemode_to_cpu(ri->mode),
+		make_kuid(inode->i_sb->s_user_ns, je16_to_cpu(ri->uid)),
+		make_kgid(inode->i_sb->s_user_ns, je16_to_cpu(ri->gid)));
 
 
 	old_metadata = f->metadata;
