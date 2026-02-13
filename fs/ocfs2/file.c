@@ -1403,9 +1403,11 @@ static int __ocfs2_write_remove_suid(struct inode *inode,
 		goto out_trans;
 	}
 
+	inode_attr_begin(inode);
 	inode->i_mode &= ~S_ISUID;
 	if ((inode->i_mode & S_ISGID) && (inode->i_mode & S_IXGRP))
 		inode->i_mode &= ~S_ISGID;
+	inode_attr_end(inode);
 
 	di = (struct ocfs2_dinode *) bh->b_data;
 	di->i_mode = cpu_to_le16(inode->i_mode);

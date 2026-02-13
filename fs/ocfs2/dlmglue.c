@@ -2233,9 +2233,9 @@ static int ocfs2_refresh_inode_from_lvb(struct inode *inode)
 	else
 		inode->i_blocks = ocfs2_inode_sector_count(inode);
 
-	i_uid_write(inode, be32_to_cpu(lvb->lvb_iuid));
-	i_gid_write(inode, be32_to_cpu(lvb->lvb_igid));
-	inode->i_mode    = be16_to_cpu(lvb->lvb_imode);
+	inode_update_permissions(inode, be16_to_cpu(lvb->lvb_imode),
+		make_kuid(inode->i_sb->s_user_ns, be32_to_cpu(lvb->lvb_iuid)),
+		make_kgid(inode->i_sb->s_user_ns, be32_to_cpu(lvb->lvb_igid)));
 	set_nlink(inode, be16_to_cpu(lvb->lvb_inlink));
 	ocfs2_unpack_timespec(&ts, be64_to_cpu(lvb->lvb_iatime_packed));
 	inode_set_atime_to_ts(inode, ts);

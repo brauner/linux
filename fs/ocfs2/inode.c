@@ -1403,9 +1403,9 @@ void ocfs2_refresh_inode(struct inode *inode,
 	ocfs2_set_inode_flags(inode);
 	i_size_write(inode, le64_to_cpu(fe->i_size));
 	set_nlink(inode, ocfs2_read_links_count(fe));
-	i_uid_write(inode, le32_to_cpu(fe->i_uid));
-	i_gid_write(inode, le32_to_cpu(fe->i_gid));
-	inode->i_mode = le16_to_cpu(fe->i_mode);
+	inode_update_permissions(inode, le16_to_cpu(fe->i_mode),
+		make_kuid(inode->i_sb->s_user_ns, le32_to_cpu(fe->i_uid)),
+		make_kgid(inode->i_sb->s_user_ns, le32_to_cpu(fe->i_gid)));
 	if (S_ISLNK(inode->i_mode) && le32_to_cpu(fe->i_clusters) == 0)
 		inode->i_blocks = 0;
 	else

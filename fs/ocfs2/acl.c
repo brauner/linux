@@ -191,7 +191,9 @@ static int ocfs2_acl_set_mode(struct inode *inode, struct buffer_head *di_bh,
 		goto out_commit;
 	}
 
+	inode_attr_begin(inode);
 	inode->i_mode = new_mode;
+	inode_attr_end(inode);
 	inode_set_ctime_current(inode);
 	di->i_mode = cpu_to_le16(inode->i_mode);
 	di->i_ctime = cpu_to_le64(inode_get_ctime_sec(inode));
