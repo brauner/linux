@@ -372,7 +372,8 @@ EXPORT_SYMBOL(posix_acl_from_mode);
  */
 int
 posix_acl_permission(struct mnt_idmap *idmap, struct inode *inode,
-		     const struct posix_acl *acl, int want)
+		     const struct posix_acl *acl, int want,
+		     const struct inode_perm_attrs *attrs)
 {
 	const struct posix_acl_entry *pa, *pe, *mask_obj;
 	struct user_namespace *fs_userns = i_user_ns(inode);
@@ -386,8 +387,7 @@ posix_acl_permission(struct mnt_idmap *idmap, struct inode *inode,
                 switch(pa->e_tag) {
                         case ACL_USER_OBJ:
 				/* (May have been checked already) */
-				vfsuid = i_uid_into_vfsuid(idmap, inode);
-				if (vfsuid_eq_kuid(vfsuid, current_fsuid()))
+				if (vfsuid_eq_kuid(attrs->vfsuid, current_fsuid()))
                                         goto check_perm;
                                 break;
                         case ACL_USER:
@@ -397,8 +397,7 @@ posix_acl_permission(struct mnt_idmap *idmap, struct inode *inode,
                                         goto mask;
 				break;
                         case ACL_GROUP_OBJ:
-				vfsgid = i_gid_into_vfsgid(idmap, inode);
-				if (vfsgid_in_group_p(vfsgid)) {
+				if (vfsgid_in_group_p(attrs->vfsgid)) {
 					found = 1;
 					if ((pa->e_perm & want) == want)
 						goto mask;

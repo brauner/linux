@@ -1917,7 +1917,8 @@ static struct dentry *sel_make_dir(struct dentry *dir, const char *name,
 	return sel_attach(dir, name, inode);
 }
 
-static int reject_all(struct mnt_idmap *idmap, struct inode *inode, int mask)
+static int reject_all(struct mnt_idmap *idmap, struct inode *inode, int mask,
+		      struct inode_perm_attrs *attrs)
 {
 	return -EPERM;	// no access for anyone, root or no root.
 }

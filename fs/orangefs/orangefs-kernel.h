@@ -358,7 +358,8 @@ int orangefs_getattr(struct mnt_idmap *idmap, const struct path *path,
 		     struct kstat *stat, u32 request_mask, unsigned int flags);
 
 int orangefs_permission(struct mnt_idmap *idmap,
-			struct inode *inode, int mask);
+			struct inode *inode, int mask,
+			struct inode_perm_attrs *attrs);
 
 int orangefs_update_time(struct inode *inode, enum fs_update_time type,
 		unsigned int flags);

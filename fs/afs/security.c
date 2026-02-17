@@ -429,7 +429,7 @@ int afs_check_permit(struct afs_vnode *vnode, struct key *key,
  *   parent directory's ACL
  */
 int afs_permission(struct mnt_idmap *idmap, struct inode *inode,
-		   int mask)
+		   int mask, struct inode_perm_attrs *attrs)
 {
 	struct afs_vnode *vnode = AFS_FS_I(inode);
 	afs_access_t access;
@@ -467,10 +467,10 @@ int afs_permission(struct mnt_idmap *idmap, struct inode *inode,
 
 	/* interpret the access mask */
 	_debug("REQ %x ACC %x on %s",
-	       mask, access, S_ISDIR(inode->i_mode) ? "dir" : "file");
+	       mask, access, S_ISDIR(attrs->mode) ? "dir" : "file");
 
 	ret = 0;
-	if (S_ISDIR(inode->i_mode)) {
+	if (S_ISDIR(attrs->mode)) {
 		if (mask & (MAY_EXEC | MAY_READ | MAY_CHDIR)) {
 			if (!(access & AFS_ACE_LOOKUP))
 				goto permission_denied;
@@ -483,17 +483,17 @@ int afs_permission(struct mnt_idmap *idmap, struct inode *inode,
 	} else {
 		if (!(access & AFS_ACE_LOOKUP))
 			goto permission_denied;
-		if ((mask & MAY_EXEC) && !(inode->i_mode & S_IXUSR))
+		if ((mask & MAY_EXEC) && !(attrs->mode & S_IXUSR))
 			goto permission_denied;
 		if (mask & (MAY_EXEC | MAY_READ)) {
 			if (!(access & AFS_ACE_READ))
 				goto permission_denied;
-			if (!(inode->i_mode & S_IRUSR))
+			if (!(attrs->mode & S_IRUSR))
 				goto permission_denied;
 		} else if (mask & MAY_WRITE) {
 			if (!(access & AFS_ACE_WRITE))
 				goto permission_denied;
-			if (!(inode->i_mode & S_IWUSR))
+			if (!(attrs->mode & S_IWUSR))
 				goto permission_denied;
 		}
 	}

@@ -946,7 +946,7 @@ out_err:
 }
 
 int nilfs_permission(struct mnt_idmap *idmap, struct inode *inode,
-		     int mask)
+		     int mask, struct inode_perm_attrs *attrs)
 {
 	struct nilfs_root *root = NILFS_I(inode)->i_root;
 
@@ -954,7 +954,7 @@ int nilfs_permission(struct mnt_idmap *idmap, struct inode *inode,
 	    root->cno != NILFS_CPTREE_CURRENT_CNO)
 		return -EROFS; /* snapshot is not writable */
 
-	return generic_permission(&nop_mnt_idmap, inode, mask);
+	return generic_permission(&nop_mnt_idmap, inode, mask, attrs);
 }
 
 int nilfs_load_inode_block(struct inode *inode, struct buffer_head **pbh)

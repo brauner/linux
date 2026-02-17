@@ -83,7 +83,8 @@ static int seq_fdinfo_open(struct inode *inode, struct file *file)
  * POSIX-like checks.
  */
 static int proc_fdinfo_permission(struct mnt_idmap *idmap, struct inode *inode,
-				  int mask)
+				  int mask,
+				  struct inode_perm_attrs *attrs)
 {
 	bool allowed = false;
 	struct task_struct *task = get_proc_task(inode);
@@ -97,7 +98,7 @@ static int proc_fdinfo_permission(struct mnt_idmap *idmap, struct inode *inode,
 	if (!allowed)
 		return -EACCES;
 
-	return generic_permission(idmap, inode, mask);
+	return generic_permission(idmap, inode, mask, attrs);
 }
 
 static const struct inode_operations proc_fdinfo_file_inode_operations = {
@@ -329,12 +330,13 @@ static struct dentry *proc_lookupfd(struct inode *dir, struct dentry *dentry,
  * access /proc/self/fd after it has executed a setuid().
  */
 int proc_fd_permission(struct mnt_idmap *idmap,
-		       struct inode *inode, int mask)
+		       struct inode *inode, int mask,
+		       struct inode_perm_attrs *attrs)
 {
 	struct task_struct *p;
 	int rv;
 
-	rv = generic_permission(&nop_mnt_idmap, inode, mask);
+	rv = generic_permission(&nop_mnt_idmap, inode, mask, attrs);
 	if (rv == 0)
 		return rv;
 

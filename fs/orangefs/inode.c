@@ -855,7 +855,8 @@ int orangefs_getattr(struct mnt_idmap *idmap, const struct path *path,
 }
 
 int orangefs_permission(struct mnt_idmap *idmap,
-			struct inode *inode, int mask)
+			struct inode *inode, int mask,
+			struct inode_perm_attrs *attrs)
 {
 	int ret;
 
@@ -869,7 +870,8 @@ int orangefs_permission(struct mnt_idmap *idmap,
 	if (ret < 0)
 		return ret;
 
-	return generic_permission(&nop_mnt_idmap, inode, mask);
+	return generic_permission(&nop_mnt_idmap, inode,
+				  mask | MAY_REFRESH_ATTRS, attrs);
 }
 
 int orangefs_update_time(struct inode *inode, enum fs_update_time type,

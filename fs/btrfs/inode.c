@@ -9301,7 +9301,8 @@ int btrfs_prealloc_file_range_trans(struct inode *inode,
  * elide calls here.
  */
 static int btrfs_permission(struct mnt_idmap *idmap,
-			    struct inode *inode, int mask)
+			    struct inode *inode, int mask,
+			    struct inode_perm_attrs *attrs)
 {
 	struct btrfs_root *root = BTRFS_I(inode)->root;
 	umode_t mode = inode->i_mode;
@@ -9313,7 +9314,7 @@ static int btrfs_permission(struct mnt_idmap *idmap,
 		if (BTRFS_I(inode)->flags & BTRFS_INODE_READONLY)
 			return -EACCES;
 	}
-	return generic_permission(idmap, inode, mask);
+	return generic_permission(idmap, inode, mask, attrs);
 }
 
 static int btrfs_tmpfile(struct mnt_idmap *idmap, struct inode *dir,

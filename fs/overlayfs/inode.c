@@ -288,7 +288,8 @@ int ovl_getattr(struct mnt_idmap *idmap, const struct path *path,
 }
 
 int ovl_permission(struct mnt_idmap *idmap,
-		   struct inode *inode, int mask)
+		   struct inode *inode, int mask,
+		   struct inode_perm_attrs *attrs)
 {
 	struct inode *upperinode = ovl_inode_upper(inode);
 	struct inode *realinode;
@@ -306,7 +307,7 @@ int ovl_permission(struct mnt_idmap *idmap,
 	 * Check overlay inode with the creds of task and underlying inode
 	 * with creds of mounter
 	 */
-	err = generic_permission(&nop_mnt_idmap, inode, mask);
+	err = generic_permission(&nop_mnt_idmap, inode, mask, attrs);
 	if (err)
 		return err;
 

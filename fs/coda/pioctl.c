@@ -25,7 +25,8 @@
 
 /* pioctl ops */
 static int coda_ioctl_permission(struct mnt_idmap *idmap,
-				 struct inode *inode, int mask);
+				 struct inode *inode, int mask,
+				 struct inode_perm_attrs *attrs);
 static long coda_pioctl(struct file *filp, unsigned int cmd,
 			unsigned long user_data);
 
@@ -42,7 +43,8 @@ const struct file_operations coda_ioctl_operations = {
 
 /* the coda pioctl inode ops */
 static int coda_ioctl_permission(struct mnt_idmap *idmap,
-				 struct inode *inode, int mask)
+				 struct inode *inode, int mask,
+				 struct inode_perm_attrs *attrs)
 {
 	return (mask & MAY_EXEC) ? -EACCES : 0;
 }

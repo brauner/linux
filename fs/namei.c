@@ -367,7 +367,8 @@ struct filename *complete_getname(struct delayed_filename *v)
  * raw inode simply pass @nop_mnt_idmap.
  */
 static int check_acl(struct mnt_idmap *idmap,
-		     struct inode *inode, int mask)
+		     struct inode *inode, int mask,
+		     const struct inode_perm_attrs *attrs)
 {
 #ifdef CONFIG_FS_POSIX_ACL
 	struct posix_acl *acl;
@@ -379,14 +380,15 @@ static int check_acl(struct mnt_idmap *idmap,
 		/* no ->get_inode_acl() calls in RCU mode... */
 		if (is_uncached_acl(acl))
 			return -ECHILD;
-	        return posix_acl_permission(idmap, inode, acl, mask);
+	        return posix_acl_permission(idmap, inode, acl, mask, attrs);
 	}
 
 	acl = get_inode_acl(inode, ACL_TYPE_ACCESS);
 	if (IS_ERR(acl))
 		return PTR_ERR(acl);
 	if (acl) {
-	        int error = posix_acl_permission(idmap, inode, acl, mask);
+	        int error = posix_acl_permission(idmap, inode, acl, mask,
+						 attrs);
 	        posix_acl_release(acl);
 	        return error;
 	}
@@ -419,6 +421,7 @@ static inline bool no_acl_inode(struct inode *inode)
  * @idmap:	idmap of the mount the inode was found from
  * @inode:	inode to check permissions on
  * @mask:	right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC ...)
+ * @attrs:	consistent snapshot of inode permission attributes
  *
  * This function performs the basic UNIX permission checking. Since this
  * function may retrieve POSIX acls it needs to know whether it is called from a
@@ -431,10 +434,10 @@ static inline bool no_acl_inode(struct inode *inode)
  * raw inode simply pass @nop_mnt_idmap.
  */
 static int acl_permission_check(struct mnt_idmap *idmap,
-				struct inode *inode, int mask)
+				struct inode *inode, int mask,
+				const struct inode_perm_attrs *attrs)
 {
-	unsigned int mode = inode->i_mode;
-	vfsuid_t vfsuid;
+	unsigned int mode = attrs->mode;
 
 	/*
 	 * Common cheap case: everybody has the requested
@@ -459,8 +462,7 @@ static int acl_permission_check(struct mnt_idmap *idmap,
 	}
 
 	/* Are we the owner? If so, ACL's don't matter */
-	vfsuid = i_uid_into_vfsuid(idmap, inode);
-	if (likely(vfsuid_eq_kuid(vfsuid, current_fsuid()))) {
+	if (likely(vfsuid_eq_kuid(attrs->vfsuid, current_fsuid()))) {
 		mask &= 7;
 		mode >>= 6;
 		return (mask & ~mode) ? -EACCES : 0;
@@ -468,7 +470,7 @@ static int acl_permission_check(struct mnt_idmap *idmap,
 
 	/* Do we have ACL's? */
 	if (IS_POSIXACL(inode) && (mode & S_IRWXG)) {
-		int error = check_acl(idmap, inode, mask);
+		int error = check_acl(idmap, inode, mask, attrs);
 		if (error != -EAGAIN)
 			return error;
 	}
@@ -482,13 +484,27 @@ static int acl_permission_check(struct mnt_idmap *idmap,
 	 * about? Need to check group ownership if so.
 	 */
 	if (mask & (mode ^ (mode >> 3))) {
-		vfsgid_t vfsgid = i_gid_into_vfsgid(idmap, inode);
-		if (vfsgid_in_group_p(vfsgid))
+		if (vfsgid_in_group_p(attrs->vfsgid))
 			mode >>= 3;
 	}
 
 	/* Bits in 'mode' clear that we require? */
 	return (mask & ~mode) ? -EACCES : 0;
+}
+
+/*
+ * Capability check using pre-snapshotted permission attributes.
+ * Equivalent to capable_wrt_inode_uidgid() but avoids re-reading
+ * i_uid/i_gid from the inode.
+ */
+static bool capable_wrt_perm_attrs(const struct inode_perm_attrs *attrs,
+				   int cap)
+{
+	struct user_namespace *ns = current_user_ns();
+
+	return ns_capable(ns, cap) &&
+	       vfsuid_has_mapping(ns, attrs->vfsuid) &&
+	       vfsgid_has_mapping(ns, attrs->vfsgid);
 }
 
 /**
@@ -497,6 +513,7 @@ static int acl_permission_check(struct mnt_idmap *idmap,
  * @inode:	inode to check access rights for
  * @mask:	right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC,
  *		%MAY_NOT_BLOCK ...)
+ * @attrs:	pre-snapshotted permission attributes (or NULL)
  *
  * Used to check for read/write/execute permissions on a file.
  * We use "fsuid" for this, letting us set arbitrary permissions
@@ -512,27 +529,34 @@ static int acl_permission_check(struct mnt_idmap *idmap,
  * care to map the inode according to @idmap before checking permissions.
  * On non-idmapped mounts or if permission checking is to be performed on the
  * raw inode simply pass @nop_mnt_idmap.
+ *
+ * If @attrs is non-NULL, it is used directly; otherwise a fresh snapshot
+ * is taken from the inode.
  */
-int generic_permission(struct mnt_idmap *idmap, struct inode *inode,
-		       int mask)
+int generic_permission(struct mnt_idmap *idmap, struct inode *inode, int mask,
+		       struct inode_perm_attrs *attrs)
 {
 	int ret;
+
+	VFS_WARN_ON_ONCE(!attrs);
+
+	if (mask & MAY_REFRESH_ATTRS)
+		inode_snap_perm_attrs(attrs, idmap, inode);
 
 	/*
 	 * Do the basic permission checks.
 	 */
-	ret = acl_permission_check(idmap, inode, mask);
+	ret = acl_permission_check(idmap, inode, mask, attrs);
 	if (ret != -EACCES)
 		return ret;
 
-	if (S_ISDIR(inode->i_mode)) {
+	if (S_ISDIR(attrs->mode)) {
 		/* DACs are overridable for directories */
 		if (!(mask & MAY_WRITE))
-			if (capable_wrt_inode_uidgid(idmap, inode,
-						     CAP_DAC_READ_SEARCH))
+			if (capable_wrt_perm_attrs(attrs,
+						   CAP_DAC_READ_SEARCH))
 				return 0;
-		if (capable_wrt_inode_uidgid(idmap, inode,
-					     CAP_DAC_OVERRIDE))
+		if (capable_wrt_perm_attrs(attrs, CAP_DAC_OVERRIDE))
 			return 0;
 		return -EACCES;
 	}
@@ -542,17 +566,15 @@ int generic_permission(struct mnt_idmap *idmap, struct inode *inode,
 	 */
 	mask &= MAY_READ | MAY_WRITE | MAY_EXEC;
 	if (mask == MAY_READ)
-		if (capable_wrt_inode_uidgid(idmap, inode,
-					     CAP_DAC_READ_SEARCH))
+		if (capable_wrt_perm_attrs(attrs, CAP_DAC_READ_SEARCH))
 			return 0;
 	/*
 	 * Read/write DACs are always overridable.
 	 * Executable DACs are overridable when there is
 	 * at least one exec bit set.
 	 */
-	if (!(mask & MAY_EXEC) || (inode->i_mode & S_IXUGO))
-		if (capable_wrt_inode_uidgid(idmap, inode,
-					     CAP_DAC_OVERRIDE))
+	if (!(mask & MAY_EXEC) || (attrs->mode & S_IXUGO))
+		if (capable_wrt_perm_attrs(attrs, CAP_DAC_OVERRIDE))
 			return 0;
 
 	return -EACCES;
@@ -564,6 +586,7 @@ EXPORT_SYMBOL(generic_permission);
  * @idmap:	idmap of the mount the inode was found from
  * @inode:	inode to check permissions on
  * @mask:	right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC ...)
+ * @attrs:	consistent snapshot of inode permission attributes
  *
  * We _really_ want to just do "generic_permission()" without
  * even looking at the inode->i_op values. So we keep a cache
@@ -571,18 +594,19 @@ EXPORT_SYMBOL(generic_permission);
  * permission function, use the fast case".
  */
 static inline int do_inode_permission(struct mnt_idmap *idmap,
-				      struct inode *inode, int mask)
+				      struct inode *inode, int mask,
+				      struct inode_perm_attrs *attrs)
 {
 	if (unlikely(!(inode->i_opflags & IOP_FASTPERM))) {
 		if (likely(inode->i_op->permission))
-			return inode->i_op->permission(idmap, inode, mask);
+			return inode->i_op->permission(idmap, inode, mask, attrs);
 
 		/* This gets set once for the inode lifetime */
 		spin_lock(&inode->i_lock);
 		inode->i_opflags |= IOP_FASTPERM;
 		spin_unlock(&inode->i_lock);
 	}
-	return generic_permission(idmap, inode, mask);
+	return generic_permission(idmap, inode, mask, attrs);
 }
 
 /**
@@ -610,9 +634,9 @@ static int sb_permission(struct super_block *sb, struct inode *inode, int mask)
 
 /**
  * inode_permission - Check for access rights to a given inode
- * @idmap:	idmap of the mount the inode was found from
- * @inode:	Inode to check permission on
- * @mask:	Right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
+ * @idmap:     idmap of the mount the inode was found from
+ * @inode:     Inode to check permission on
+ * @mask:      Right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
  *
  * Check for read/write/execute permissions on an inode.  We use fs[ug]id for
  * this, letting us set arbitrary permissions for filesystem access without
@@ -620,14 +644,18 @@ static int sb_permission(struct super_block *sb, struct inode *inode, int mask)
  *
  * When checking for MAY_APPEND, MAY_WRITE must also be set in @mask.
  */
-int inode_permission(struct mnt_idmap *idmap,
-		     struct inode *inode, int mask)
+int inode_permission_attrs(struct mnt_idmap *idmap, struct inode *inode,
+			   int mask, struct inode_perm_attrs *attrs)
 {
 	int retval;
+
+	VFS_WARN_ON_ONCE(!attrs);
 
 	retval = sb_permission(inode->i_sb, inode, mask);
 	if (unlikely(retval))
 		return retval;
+
+	inode_snap_perm_attrs(attrs, idmap, inode);
 
 	if (mask & MAY_WRITE) {
 		/*
@@ -641,11 +669,12 @@ int inode_permission(struct mnt_idmap *idmap,
 		 * written back improperly if their true value is unknown
 		 * to the vfs.
 		 */
-		if (unlikely(HAS_UNMAPPED_ID(idmap, inode)))
+		if (unlikely(!vfsuid_valid(attrs->vfsuid) ||
+			     !vfsgid_valid(attrs->vfsgid)))
 			return -EACCES;
 	}
 
-	retval = do_inode_permission(idmap, inode, mask);
+	retval = do_inode_permission(idmap, inode, mask, attrs);
 	if (unlikely(retval))
 		return retval;
 
@@ -655,7 +684,7 @@ int inode_permission(struct mnt_idmap *idmap,
 
 	return security_inode_permission(inode, mask);
 }
-EXPORT_SYMBOL(inode_permission);
+EXPORT_SYMBOL(inode_permission_attrs);
 
 /*
  * lookup_inode_permission_may_exec - Check traversal right for given inode
@@ -2588,7 +2617,6 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 	/* At this point we know we have a real path component. */
 	for(;;) {
 		struct mnt_idmap *idmap;
-		unsigned int seq;
 		const char *link;
 		unsigned long lastword;
 
@@ -2635,11 +2663,11 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 OK:
 			/* pathname or trailing symlink, done */
 			if (likely(!depth)) {
-				do {
-					seq = read_seqcount_begin(&nd->inode->i_attr_seq);
-					nd->dir_vfsuid = i_uid_into_vfsuid(idmap, nd->inode);
-					nd->dir_mode = nd->inode->i_mode;
-				} while (read_seqcount_retry(&nd->inode->i_attr_seq, seq));
+				struct inode_perm_attrs attrs;
+
+				inode_snap_perm_attrs(&attrs, idmap, nd->inode);
+				nd->dir_vfsuid = attrs.vfsuid;
+				nd->dir_mode = attrs.mode;
 				nd->flags &= ~LOOKUP_PARENT;
 				return 0;
 			}

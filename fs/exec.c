@@ -1530,9 +1530,7 @@ static void bprm_fill_uid(struct linux_binprm *bprm, struct file *file)
 	/* Handle suid and sgid on files */
 	struct mnt_idmap *idmap;
 	struct inode *inode = file_inode(file);
-	unsigned int mode;
-	vfsuid_t vfsuid;
-	vfsgid_t vfsgid;
+	struct inode_perm_attrs attrs;
 	int err;
 
 	if (!mnt_may_suid(file->f_path.mnt))
@@ -1541,39 +1539,31 @@ static void bprm_fill_uid(struct linux_binprm *bprm, struct file *file)
 	if (task_no_new_privs(current))
 		return;
 
-	mode = READ_ONCE(inode->i_mode);
-	if (!(mode & (S_ISUID|S_ISGID)))
-		return;
-
 	idmap = file_mnt_idmap(file);
 
-	/* Be careful if suid/sgid is set */
-	inode_lock(inode);
+	if (!(READ_ONCE(inode->i_mode) & (S_ISUID | S_ISGID)))
+		return;
 
-	/* Atomically reload and check mode/uid/gid now that lock held. */
-	mode = inode->i_mode;
-	vfsuid = i_uid_into_vfsuid(idmap, inode);
-	vfsgid = i_gid_into_vfsgid(idmap, inode);
-	err = inode_permission(idmap, inode, MAY_EXEC);
-	inode_unlock(inode);
-
-	/* Did the exec bit vanish out from under us? Give up. */
+	err = inode_permission(idmap, inode, MAY_EXEC, &attrs);
 	if (err)
 		return;
 
-	/* We ignore suid/sgid if there are no mappings for them in the ns */
-	if (!vfsuid_has_mapping(bprm->cred->user_ns, vfsuid) ||
-	    !vfsgid_has_mapping(bprm->cred->user_ns, vfsgid))
+	if (!(attrs.mode & (S_ISUID | S_ISGID)))
 		return;
 
-	if (mode & S_ISUID) {
+	/* We ignore suid/sgid if there are no mappings for them in the ns */
+	if (!vfsuid_has_mapping(bprm->cred->user_ns, attrs.vfsuid) ||
+	    !vfsgid_has_mapping(bprm->cred->user_ns, attrs.vfsgid))
+		return;
+
+	if (attrs.mode & S_ISUID) {
 		bprm->per_clear |= PER_CLEAR_ON_SETID;
-		bprm->cred->euid = vfsuid_into_kuid(vfsuid);
+		bprm->cred->euid = vfsuid_into_kuid(attrs.vfsuid);
 	}
 
-	if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
+	if ((attrs.mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
 		bprm->per_clear |= PER_CLEAR_ON_SETID;
-		bprm->cred->egid = vfsgid_into_kgid(vfsgid);
+		bprm->cred->egid = vfsgid_into_kgid(attrs.vfsgid);
 	}
 }
 

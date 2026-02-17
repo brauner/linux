@@ -790,7 +790,8 @@ out:
 }
 
 static int proc_sys_permission(struct mnt_idmap *idmap,
-			       struct inode *inode, int mask)
+			       struct inode *inode, int mask,
+			       struct inode_perm_attrs *attrs)
 {
 	/*
 	 * sysctl entries that are not writeable,

@@ -763,7 +763,8 @@ static bool has_pid_permissions(struct proc_fs_info *fs_info,
 
 
 static int proc_pid_permission(struct mnt_idmap *idmap,
-			       struct inode *inode, int mask)
+			       struct inode *inode, int mask,
+			       struct inode_perm_attrs *attrs)
 {
 	struct proc_fs_info *fs_info = proc_sb_info(inode->i_sb);
 	struct task_struct *task;
@@ -788,7 +789,7 @@ static int proc_pid_permission(struct mnt_idmap *idmap,
 
 		return -EPERM;
 	}
-	return generic_permission(&nop_mnt_idmap, inode, mask);
+	return generic_permission(&nop_mnt_idmap, inode, mask, attrs);
 }
 
 
@@ -3624,7 +3625,8 @@ int proc_pid_readdir(struct file *file, struct dir_context *ctx)
  * same thread group.
  */
 static int proc_tid_comm_permission(struct mnt_idmap *idmap,
-				    struct inode *inode, int mask)
+				    struct inode *inode, int mask,
+				    struct inode_perm_attrs *attrs)
 {
 	bool is_same_tgroup;
 	struct task_struct *task;
@@ -3643,7 +3645,7 @@ static int proc_tid_comm_permission(struct mnt_idmap *idmap,
 		return 0;
 	}
 
-	return generic_permission(&nop_mnt_idmap, inode, mask);
+	return generic_permission(&nop_mnt_idmap, inode, mask, attrs);
 }
 
 static const struct inode_operations proc_tid_comm_inode_operations = {

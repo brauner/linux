@@ -304,7 +304,7 @@ extern int nilfs_setattr(struct mnt_idmap *, struct dentry *,
 			 struct iattr *);
 extern void nilfs_write_failed(struct address_space *mapping, loff_t to);
 int nilfs_permission(struct mnt_idmap *idmap, struct inode *inode,
-		     int mask);
+		     int mask, struct inode_perm_attrs *attrs);
 int nilfs_load_inode_block(struct inode *inode, struct buffer_head **pbh);
 extern int nilfs_inode_dirty(struct inode *);
 int nilfs_set_file_dirty(struct inode *inode, unsigned int nr_dirty);

@@ -788,7 +788,7 @@ unsigned int ovl_get_nlink(struct ovl_fs *ofs, struct dentry *lowerdentry,
 			   struct dentry *upperdentry,
 			   unsigned int fallback);
 int ovl_permission(struct mnt_idmap *idmap, struct inode *inode,
-		   int mask);
+		   int mask, struct inode_perm_attrs *attrs);
 
 #ifdef CONFIG_FS_POSIX_ACL
 struct posix_acl *do_ovl_get_acl(struct mnt_idmap *idmap,

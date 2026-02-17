@@ -864,7 +864,7 @@ int ecryptfs_truncate(struct dentry *dentry, loff_t new_length)
 
 static int
 ecryptfs_permission(struct mnt_idmap *idmap, struct inode *inode,
-		    int mask)
+		    int mask, struct inode_perm_attrs *attrs)
 {
 	return inode_permission(&nop_mnt_idmap,
 				ecryptfs_inode_to_lower(inode), mask);

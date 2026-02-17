@@ -32,6 +32,7 @@
 #include <linux/uidgid.h>
 #include <linux/lockdep.h>
 #include <linux/percpu-rwsem.h>
+#include <linux/args.h>
 #include <linux/workqueue.h>
 #include <linux/delayed_call.h>
 #include <linux/uuid.h>
@@ -100,6 +101,7 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 #define MAY_CHDIR		0x00000040
 /* called from RCU mode, don't block */
 #define MAY_NOT_BLOCK		0x00000080
+#define MAY_REFRESH_ATTRS	0x00000100
 
 /*
  * flags in file.f_mode.  Note that FMODE_READ and FMODE_WRITE must correspond
@@ -1101,6 +1103,23 @@ static inline void inode_update_permissions(struct inode *inode,
 	inode_attr_end(inode);
 }
 
+/**
+ * struct inode_perm_attrs - consistent snapshot of inode permission attributes
+ * @mode:	snapshotted i_mode
+ * @vfsuid:	snapshotted i_uid mapped through the mount's idmap
+ * @vfsgid:	snapshotted i_gid mapped through the mount's idmap
+ *
+ * Holds a point-in-time snapshot of the inode's permission triple
+ * {i_mode, i_uid, i_gid} taken under the inode's i_attr_seq seqcount.
+ * Once snapshotted the values can be used without further synchronization,
+ * even across sleeping operations like ACL fetches.
+ */
+struct inode_perm_attrs {
+	umode_t		mode;
+	vfsuid_t	vfsuid;
+	vfsgid_t	vfsgid;
+};
+
 static inline void filemap_invalidate_lock(struct address_space *mapping)
 {
 	down_write(&mapping->invalidate_lock);
@@ -1522,6 +1541,33 @@ static inline vfsgid_t i_gid_into_vfsgid(struct mnt_idmap *idmap,
 					 const struct inode *inode)
 {
 	return make_vfsgid(idmap, i_user_ns(inode), inode->i_gid);
+}
+
+/**
+ * inode_snap_perm_attrs - snapshot inode permission attributes consistently
+ * @attrs:	output snapshot struct
+ * @idmap:	idmap of the mount the inode was found from
+ * @inode:	inode to snapshot
+ *
+ * Takes a consistent snapshot of @inode's i_mode, i_uid and i_gid under
+ * the inode's i_attr_seq seqcount.  The uid and gid are mapped through
+ * @idmap so callers get vfsuid/vfsgid directly.
+ *
+ * The seqcount critical section contains only plain field reads and
+ * trivial idmap arithmetic -- it cannot sleep or fault.
+ */
+static inline void inode_snap_perm_attrs(struct inode_perm_attrs *attrs,
+					 struct mnt_idmap *idmap,
+					 const struct inode *inode)
+{
+	unsigned seq;
+
+	do {
+		seq = read_seqcount_begin(&inode->i_attr_seq);
+		attrs->mode = inode->i_mode;
+		attrs->vfsuid = i_uid_into_vfsuid(idmap, inode);
+		attrs->vfsgid = i_gid_into_vfsgid(idmap, inode);
+	} while (read_seqcount_retry(&inode->i_attr_seq, seq));
 }
 
 /**
@@ -2024,7 +2070,8 @@ enum fs_update_time {
 struct inode_operations {
 	struct dentry * (*lookup) (struct inode *,struct dentry *, unsigned int);
 	const char * (*get_link) (struct dentry *, struct inode *, struct delayed_call *);
-	int (*permission) (struct mnt_idmap *, struct inode *, int);
+	int (*permission) (struct mnt_idmap *, struct inode *, int,
+			   struct inode_perm_attrs *);
 	struct posix_acl * (*get_inode_acl)(struct inode *, int, bool);
 
 	int (*readlink) (struct dentry *, char __user *,int);
@@ -2689,8 +2736,20 @@ static inline int bmap(struct inode *inode,  sector_t *block)
 
 int notify_change(struct mnt_idmap *, struct dentry *,
 		  struct iattr *, struct delegated_inode *);
-int inode_permission(struct mnt_idmap *, struct inode *, int);
-int generic_permission(struct mnt_idmap *, struct inode *, int);
+int inode_permission_attrs(struct mnt_idmap *, struct inode *, int,
+			     struct inode_perm_attrs *);
+int generic_permission(struct mnt_idmap *, struct inode *, int,
+		       struct inode_perm_attrs *);
+
+#define __inode_perm0(idmap, inode, mask, ...) \
+	inode_permission_attrs(idmap, inode, mask, &(struct inode_perm_attrs){})
+#define __inode_perm1(idmap, inode, mask, attrs) \
+	inode_permission_attrs(idmap, inode, mask, attrs)
+
+#define inode_permission(idmap, inode, mask, ...)          \
+	CONCATENATE(__inode_perm, COUNT_ARGS(__VA_ARGS__)) \
+	(idmap, inode, mask, __VA_ARGS__)
+
 static inline int file_permission(struct file *file, int mask)
 {
 	return inode_permission(file_mnt_idmap(file),

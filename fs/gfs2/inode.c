@@ -1963,7 +1963,7 @@ out:
  */
 
 int gfs2_permission(struct mnt_idmap *idmap, struct inode *inode,
-		    int mask)
+		    int mask, struct inode_perm_attrs *attrs)
 {
 	int may_not_block = mask & MAY_NOT_BLOCK;
 	struct gfs2_inode *ip;
@@ -1990,7 +1990,7 @@ int gfs2_permission(struct mnt_idmap *idmap, struct inode *inode,
 	if ((mask & MAY_WRITE) && IS_IMMUTABLE(inode))
 		error = -EPERM;
 	else
-		error = generic_permission(&nop_mnt_idmap, inode, mask);
+		error = generic_permission(&nop_mnt_idmap, inode, mask | MAY_REFRESH_ATTRS, attrs);
 	if (gfs2_holder_initialized(&i_gh))
 		gfs2_glock_dq_uninit(&i_gh);
 

@@ -74,7 +74,7 @@ static struct dentry *coda_lookup(struct inode *dir, struct dentry *entry, unsig
 
 
 int coda_permission(struct mnt_idmap *idmap, struct inode *inode,
-		    int mask)
+		    int mask, struct inode_perm_attrs *attrs)
 {
 	int error;
 

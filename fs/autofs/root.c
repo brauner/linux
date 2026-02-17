@@ -552,7 +552,8 @@ static struct dentry *autofs_lookup(struct inode *dir,
 }
 
 static int autofs_dir_permission(struct mnt_idmap *idmap,
-				 struct inode *inode, int mask)
+				 struct inode *inode, int mask,
+				 struct inode_perm_attrs *attrs)
 {
 	if (mask & MAY_WRITE) {
 		struct autofs_sb_info *sbi = autofs_sbi(inode->i_sb);
@@ -568,7 +569,7 @@ static int autofs_dir_permission(struct mnt_idmap *idmap,
 			return -EACCES;
 	}
 
-	return generic_permission(idmap, inode, mask);
+	return generic_permission(idmap, inode, mask, attrs);
 }
 
 static int autofs_dir_symlink(struct mnt_idmap *idmap,

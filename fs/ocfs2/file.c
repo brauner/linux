@@ -1345,7 +1345,7 @@ bail:
 }
 
 int ocfs2_permission(struct mnt_idmap *idmap, struct inode *inode,
-		     int mask)
+		     int mask, struct inode_perm_attrs *attrs)
 {
 	int ret, had_lock;
 	struct ocfs2_lock_holder oh;
@@ -1370,7 +1370,8 @@ int ocfs2_permission(struct mnt_idmap *idmap, struct inode *inode,
 		dump_stack();
 	}
 
-	ret = generic_permission(&nop_mnt_idmap, inode, mask);
+	ret = generic_permission(&nop_mnt_idmap, inode,
+				 mask | MAY_REFRESH_ATTRS, attrs);
 
 	ocfs2_inode_unlock_tracker(inode, 0, &oh, had_lock);
 out:

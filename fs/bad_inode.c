@@ -90,7 +90,8 @@ static int bad_inode_readlink(struct dentry *dentry, char __user *buffer,
 }
 
 static int bad_inode_permission(struct mnt_idmap *idmap,
-				struct inode *inode, int mask)
+				struct inode *inode, int mask,
+				struct inode_perm_attrs *attrs)
 {
 	return -EIO;
 }

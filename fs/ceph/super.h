@@ -1121,7 +1121,8 @@ static inline int ceph_do_getattr(struct inode *inode, int mask, bool force)
 	return __ceph_do_getattr(inode, NULL, mask, force);
 }
 extern int ceph_permission(struct mnt_idmap *idmap,
-			   struct inode *inode, int mask);
+			   struct inode *inode, int mask,
+			   struct inode_perm_attrs *attrs);
 
 struct ceph_iattr {
 	struct ceph_fscrypt_auth	*fscrypt_auth;

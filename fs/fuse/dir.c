@@ -1750,7 +1750,8 @@ static int fuse_perm_getattr(struct inode *inode, int mask)
  * locally based on file mode.
  */
 static int fuse_permission(struct mnt_idmap *idmap,
-			   struct inode *inode, int mask)
+			   struct inode *inode, int mask,
+			   struct inode_perm_attrs *attrs)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	bool refreshed = false;
@@ -1781,7 +1782,12 @@ static int fuse_permission(struct mnt_idmap *idmap,
 	}
 
 	if (fc->default_permissions) {
-		err = generic_permission(idmap, inode, mask);
+		int new_mask = mask;
+
+		if (refreshed)
+			new_mask |= MAY_REFRESH_ATTRS;
+
+		err = generic_permission(idmap, inode, new_mask, attrs);
 
 		/* If permission is denied, try to refresh file
 		   attributes.  This is also needed, because the root
@@ -1789,8 +1795,7 @@ static int fuse_permission(struct mnt_idmap *idmap,
 		if (err == -EACCES && !refreshed) {
 			err = fuse_perm_getattr(inode, mask);
 			if (!err)
-				err = generic_permission(idmap,
-							 inode, mask);
+				err = generic_permission(idmap, inode, mask | MAY_REFRESH_ATTRS, attrs);
 		}
 
 		/* Note: the opposite of the above test does not

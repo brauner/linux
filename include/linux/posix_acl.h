@@ -16,6 +16,7 @@
 #include <uapi/linux/posix_acl.h>
 
 struct user_namespace;
+struct inode_perm_attrs;
 
 struct posix_acl_entry {
 	short			e_tag;
@@ -97,7 +98,8 @@ void forget_cached_acl(struct inode *inode, int type);
 void forget_all_cached_acls(struct inode *inode);
 int posix_acl_valid(struct user_namespace *, const struct posix_acl *);
 int posix_acl_permission(struct mnt_idmap *, struct inode *,
-			 const struct posix_acl *, int);
+			 const struct posix_acl *, int,
+			 const struct inode_perm_attrs *);
 
 static inline void cache_no_acl(struct inode *inode)
 {

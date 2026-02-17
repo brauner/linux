@@ -215,10 +215,11 @@ static void set_tracefs_inode_owner(struct inode *inode)
 }
 
 static int tracefs_permission(struct mnt_idmap *idmap,
-			      struct inode *inode, int mask)
+			      struct inode *inode, int mask,
+			      struct inode_perm_attrs *attrs)
 {
 	set_tracefs_inode_owner(inode);
-	return generic_permission(idmap, inode, mask);
+	return generic_permission(idmap, inode, mask | MAY_REFRESH_ATTRS, attrs);
 }
 
 static int tracefs_getattr(struct mnt_idmap *idmap,

@@ -3058,7 +3058,7 @@ out:
  * the AUTH cap, then call the generic handler.
  */
 int ceph_permission(struct mnt_idmap *idmap, struct inode *inode,
-		    int mask)
+		    int mask, struct inode_perm_attrs *attrs)
 {
 	int err;
 
@@ -3068,7 +3068,7 @@ int ceph_permission(struct mnt_idmap *idmap, struct inode *inode,
 	err = ceph_do_getattr(inode, CEPH_CAP_AUTH_SHARED, false);
 
 	if (!err)
-		err = generic_permission(idmap, inode, mask);
+		err = generic_permission(idmap, inode, mask | MAY_REFRESH_ATTRS, attrs);
 	return err;
 }
 

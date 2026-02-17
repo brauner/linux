@@ -47,7 +47,7 @@ extern const struct file_operations coda_ioctl_operations;
 int coda_open(struct inode *i, struct file *f);
 int coda_release(struct inode *i, struct file *f);
 int coda_permission(struct mnt_idmap *idmap, struct inode *inode,
-		    int mask);
+		    int mask, struct inode_perm_attrs *attrs);
 int coda_revalidate_inode(struct inode *);
 int coda_getattr(struct mnt_idmap *, const struct path *, struct kstat *,
 		 u32, unsigned int);

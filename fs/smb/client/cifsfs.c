@@ -416,7 +416,8 @@ out_unlock:
 }
 
 static int cifs_permission(struct mnt_idmap *idmap,
-			   struct inode *inode, int mask)
+			   struct inode *inode, int mask,
+			   struct inode_perm_attrs *attrs)
 {
 	struct cifs_sb_info *cifs_sb;
 
@@ -431,7 +432,7 @@ static int cifs_permission(struct mnt_idmap *idmap,
 		on the client (above and beyond ACL on servers) for
 		servers which do not support setting and viewing mode bits,
 		so allowing client to check permissions is useful */
-		return generic_permission(&nop_mnt_idmap, inode, mask);
+		return generic_permission(&nop_mnt_idmap, inode, mask, attrs);
 }
 
 static struct kmem_cache *cifs_inode_cachep;
