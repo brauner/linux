@@ -4268,18 +4268,20 @@ struct mnt_namespace *copy_mnt_ns(u64 flags, struct mnt_namespace *ns,
 	new_ns->root = new;
 
 	/*
+	 * Drain the pwd reference pool. The pool must be empty before we
+	 * update new_fs->pwd.mnt below since the pooled references belong
+	 * to the old mount. Safe to access without locking: new_fs->users == 1.
+	 */
+	if (new_fs) {
+		WARN_ON_ONCE(new_fs->users != 1);
+		drain_fs_pwd_pool(new_fs);
+	}
+
+	/*
 	 * Second pass: switch the tsk->fs->* elements and mark new vfsmounts
 	 * as belonging to new namespace.  We have already acquired a private
 	 * fs_struct, so tsk->fs->lock is not needed.
 	 */
-	if (new_fs)
-		WARN_ON_ONCE(new_fs->users != 1);
-
-	/* Release the extra pwd references of new_fs, if present. */
-	while (new_fs && new_fs->pwd_refs) {
-		path_put(&new_fs->pwd);
-		new_fs->pwd_refs--;
-	}
 	p = old;
 	q = new;
 	while (p) {
