@@ -4275,6 +4275,16 @@ struct mnt_namespace *copy_mnt_ns(u64 flags, struct mnt_namespace *ns,
 	}
 	new_ns->root = new;
 
+	/*
+	 * Drain the pwd reference pool. The pool must be empty before we
+	 * update new_fs->pwd.mnt below since the pooled references belong
+	 * to the old mount. Safe to access without locking: new_fs->users == 1.
+	 */
+	if (new_fs) {
+		WARN_ON_ONCE(new_fs->users != 1);
+		drain_fs_pwd_pool(new_fs);
+	}
+
 	if (flags & CLONE_EMPTY_MNTNS) {
 		/*
 		 * Empty mount namespace: only the root mount exists.
@@ -4304,6 +4314,12 @@ struct mnt_namespace *copy_mnt_ns(u64 flags, struct mnt_namespace *ns,
 		while (p) {
 			mnt_add_to_ns(new_ns, q);
 			new_ns->nr_mounts++;
+			/*
+			 * Second pass: switch the tsk->fs->* elements and mark
+			 * new vfsmounts as belonging to new namespace.  We
+			 * have already acquired a private fs_struct, so
+			 * tsk->fs->lock is not needed.
+			 */
 			if (new_fs) {
 				if (&p->mnt == new_fs->root.mnt) {
 					old_root.mnt = new_fs->root.mnt;
