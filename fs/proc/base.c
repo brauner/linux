@@ -1910,7 +1910,7 @@ void task_dump_owner(struct task_struct *task, umode_t mode,
 			/* Zombie: no live address space - hide ownership. */
 			uid = GLOBAL_ROOT_UID;
 			gid = GLOBAL_ROOT_GID;
-		} else if (get_dumpable(task) != SUID_DUMP_USER) {
+		} else if (get_dumpable(task) != TASK_DUMPABLE_OWNER) {
 			struct user_namespace *user_ns = task_exec_user_ns(task);
 
 			uid = make_kuid(user_ns, 0);

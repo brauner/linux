@@ -1906,7 +1906,7 @@ enum {
 /* mm flags */
 
 /*
- * Bits 0 and 1 were once used to store SUID_DUMP_* dumpability.  Dumpability
+ * Bits 0 and 1 were once used to store the dumpability mode.  Dumpability
  * has moved to task->exec_state; the bits are reserved here so the existing
  * MMF_DUMP_FILTER_* bit positions remain stable for the on-disk ABI of
  * /proc/<pid>/coredump_filter.

@@ -1238,7 +1238,7 @@ int begin_new_exec(struct linux_binprm * bprm)
 	      gid_eq(current_egid(), current_gid())))
 		set_dumpable(current, suid_dumpable);
 	else
-		set_dumpable(current, SUID_DUMP_USER);
+		set_dumpable(current, TASK_DUMPABLE_OWNER);
 
 	perf_event_exec();
 
@@ -1287,7 +1287,7 @@ int begin_new_exec(struct linux_binprm * bprm)
 	 * wait until new credentials are committed
 	 * by commit_creds() above
 	 */
-	if (get_dumpable(me) != SUID_DUMP_USER)
+	if (get_dumpable(me) != TASK_DUMPABLE_OWNER)
 		perf_event_exit_task(me);
 	/*
 	 * cred_guard_mutex must be held at least to this point to prevent
@@ -1934,7 +1934,7 @@ void set_binfmt(struct linux_binfmt *new)
 EXPORT_SYMBOL(set_binfmt);
 
 /*
- * set_dumpable stores three-value SUID_DUMP_* into task->exec_state.
+ * set_dumpable stores three-value TASK_DUMPABLE_* into task->exec_state.
  * Safe to call on any task; if @task has no exec_state yet (only possible
  * during very early fork failure paths), the call is a no-op.
  */
@@ -1942,7 +1942,7 @@ void set_dumpable(struct task_struct *task, int value)
 {
 	struct task_exec_state *es;
 
-	if (WARN_ON((unsigned)value > SUID_DUMP_ROOT))
+	if (WARN_ON((unsigned)value > TASK_DUMPABLE_ROOT))
 		return;
 
 	es = task->exec_state;
@@ -1955,7 +1955,7 @@ int get_dumpable(struct task_struct *task)
 	struct task_exec_state *es = task->exec_state;
 
 	if (!es)
-		return SUID_DUMP_USER;
+		return TASK_DUMPABLE_OWNER;
 	return READ_ONCE(es->dumpable);
 }
 

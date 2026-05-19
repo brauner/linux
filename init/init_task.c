@@ -61,7 +61,7 @@ static struct sighand_struct init_sighand = {
 /* init to 2 - one for init_task, one to ensure it is never freed */
 static struct task_exec_state init_task_exec_state = {
 	.count		= REFCOUNT_INIT(2),
-	.dumpable	= SUID_DUMP_USER,
+	.dumpable	= TASK_DUMPABLE_OWNER,
 	.user_ns	= &init_user_ns,
 };
 

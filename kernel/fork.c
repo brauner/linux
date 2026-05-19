@@ -800,7 +800,7 @@ struct task_exec_state *alloc_task_exec_state(struct user_namespace *user_ns)
 	if (!es)
 		return NULL;
 	refcount_set(&es->count, 1);
-	es->dumpable = SUID_DUMP_USER;
+	es->dumpable = TASK_DUMPABLE_OWNER;
 	es->user_ns = get_user_ns(user_ns);
 	return es;
 }

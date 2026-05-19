@@ -28,7 +28,7 @@ struct user_namespace;
  * replace_task_exec_state() and drops the reference on the old one.
  *
  * @count:     refcount; one per task that points at this state.
- * @dumpable:  SUID_DUMP_* set by execve() and refined by commit_creds().
+ * @dumpable:  TASK_DUMPABLE_* set by execve() and refined by commit_creds().
  * @user_ns:   the user namespace the task was running in at last execve(),
  *             possibly narrowed by would_dump() to contain the binary.
  *             Owns a reference released when @count reaches zero.

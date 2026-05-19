@@ -54,7 +54,7 @@ int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
 
 	if (!tsk->ptrace ||
 	    (current != tsk->parent) ||
-	    ((get_dumpable(tsk) != SUID_DUMP_USER) &&
+	    ((get_dumpable(tsk) != TASK_DUMPABLE_OWNER) &&
 	     !ptracer_capable(tsk, task_exec_user_ns(tsk)))) {
 		mmput(mm);
 		return 0;
@@ -275,7 +275,7 @@ static bool ptrace_has_cap(struct user_namespace *ns, unsigned int mode)
 
 static bool task_still_dumpable(struct task_struct *task, unsigned int mode)
 {
-	if (get_dumpable(task) == SUID_DUMP_USER)
+	if (get_dumpable(task) == TASK_DUMPABLE_OWNER)
 		return true;
 	/*
 	 * The task's recorded exec-time user_ns stays valid even after the

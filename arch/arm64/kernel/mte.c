@@ -539,7 +539,7 @@ static int access_remote_tags(struct task_struct *tsk, unsigned long addr,
 		return -EPERM;
 
 	if (!tsk->ptrace || (current != tsk->parent) ||
-	    ((get_dumpable(tsk) != SUID_DUMP_USER) &&
+	    ((get_dumpable(tsk) != TASK_DUMPABLE_OWNER) &&
 	     !ptracer_capable(tsk, task_exec_user_ns(tsk)))) {
 		mmput(mm);
 		return -EPERM;

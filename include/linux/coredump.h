@@ -22,7 +22,7 @@ struct coredump_params {
 	unsigned long limit;
 	/* MMF_DUMP_FILTER_* bits, snapshot of mm->flags at dump start. */
 	unsigned long mm_flags;
-	/* SUID_DUMP_*, snapshot of dumpable at dump start. */
+	/* TASK_DUMPABLE_*, snapshot of dumpable at dump start. */
 	int dumpable;
 	int cpu;
 	loff_t written;
