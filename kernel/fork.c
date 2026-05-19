@@ -23,6 +23,7 @@
 #include <linux/sched/task_stack.h>
 #include <linux/sched/cputime.h>
 #include <linux/sched/ext.h>
+#include <linux/sched/exec_state.h>
 #include <linux/seq_file.h>
 #include <linux/rtmutex.h>
 #include <linux/init.h>
@@ -468,6 +469,9 @@ void thread_stack_cache_init(void)
 /* SLAB cache for signal_struct structures (tsk->signal) */
 static struct kmem_cache *signal_cachep;
 
+/* SLAB cache for task_exec_state structures (one per task_struct) */
+static struct kmem_cache *task_exec_state_cachep;
+
 /* SLAB cache for sighand_struct structures (tsk->sighand) */
 struct kmem_cache *sighand_cachep;
 
@@ -555,6 +559,8 @@ void free_task(struct task_struct *tsk)
 	if (tsk->flags & PF_KTHREAD)
 		free_kthread_struct(tsk);
 	bpf_task_storage_free(tsk);
+	if (tsk->exec_state)
+		put_task_exec_state(tsk->exec_state);
 	free_task_struct(tsk);
 }
 EXPORT_SYMBOL(free_task);
@@ -773,6 +779,53 @@ static inline void put_signal_struct(struct signal_struct *sig)
 {
 	if (refcount_dec_and_test(&sig->sigcnt))
 		free_signal_struct(sig);
+}
+
+static void free_task_exec_state(struct task_exec_state *es)
+{
+	put_user_ns(es->user_ns);
+	kmem_cache_free(task_exec_state_cachep, es);
+}
+
+void put_task_exec_state(struct task_exec_state *es)
+{
+	if (refcount_dec_and_test(&es->count))
+		free_task_exec_state(es);
+}
+
+struct task_exec_state *alloc_task_exec_state(struct user_namespace *user_ns)
+{
+	struct task_exec_state *es;
+
+	es = kmem_cache_alloc(task_exec_state_cachep, GFP_KERNEL);
+	if (!es)
+		return NULL;
+	refcount_set(&es->count, 1);
+	es->dumpable = SUID_DUMP_USER;
+	es->user_ns = get_user_ns(user_ns);
+	return es;
+}
+
+struct task_exec_state *dup_task_exec_state(const struct task_exec_state *old)
+{
+	struct task_exec_state *es;
+
+	es = kmem_cache_alloc(task_exec_state_cachep, GFP_KERNEL);
+	if (!es)
+		return NULL;
+	refcount_set(&es->count, 1);
+	es->dumpable = old->dumpable;
+	es->user_ns = get_user_ns(old->user_ns);
+	return es;
+}
+
+void replace_task_exec_state(struct task_struct *task,
+			     struct task_exec_state *new)
+{
+	struct task_exec_state *old = task->exec_state;
+
+	WRITE_ONCE(task->exec_state, new);
+	put_task_exec_state(old);
 }
 
 void __put_task_struct(struct task_struct *tsk)
@@ -2261,6 +2314,21 @@ __latent_entropy struct task_struct *copy_process(
 	retval = copy_signal(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_sighand;
+	/*
+	 * CLONE_VM peers (thread groups, vfork, raw clone(CLONE_VM)) share
+	 * one task_exec_state, mirroring how dumpable + user_ns used to
+	 * propagate through the shared mm.  Other forks get a fresh copy.
+	 */
+	if (clone_flags & CLONE_VM) {
+		refcount_inc(&current->exec_state->count);
+		p->exec_state = current->exec_state;
+	} else {
+		p->exec_state = dup_task_exec_state(current->exec_state);
+		if (!p->exec_state) {
+			retval = -ENOMEM;
+			goto bad_fork_cleanup_signal;
+		}
+	}
 	retval = copy_mm(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_signal;
@@ -3096,6 +3164,10 @@ void __init proc_caches_init(void)
 			SLAB_ACCOUNT, sighand_ctor);
 	signal_cachep = kmem_cache_create("signal_cache",
 			sizeof(struct signal_struct), 0,
+			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT,
+			NULL);
+	task_exec_state_cachep = kmem_cache_create("task_exec_state",
+			sizeof(struct task_exec_state), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT,
 			NULL);
 	files_cachep = kmem_cache_create("files_cache",

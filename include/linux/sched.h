@@ -85,6 +85,7 @@ struct seq_file;
 struct sighand_struct;
 struct signal_struct;
 struct task_delay_info;
+struct task_exec_state;
 struct task_group;
 struct task_struct;
 struct timespec64;
@@ -961,6 +962,13 @@ struct task_struct {
 
 	struct mm_struct		*mm;
 	struct mm_struct		*active_mm;
+
+	/*
+	 * State established at execve() that must remain readable for the
+	 * full task lifetime (e.g. after exit_mm()).  See struct
+	 * task_exec_state in <linux/sched/exec_state.h>.
+	 */
+	struct task_exec_state		*exec_state;
 
 	int				exit_state;
 	int				exit_code;
