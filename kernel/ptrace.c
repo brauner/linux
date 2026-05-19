@@ -13,6 +13,7 @@
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/coredump.h>
+#include <linux/sched/exec_state.h>
 #include <linux/sched/task.h>
 #include <linux/errno.h>
 #include <linux/mm.h>
@@ -54,7 +55,7 @@ int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
 	if (!tsk->ptrace ||
 	    (current != tsk->parent) ||
 	    ((get_dumpable(tsk) != SUID_DUMP_USER) &&
-	     !ptracer_capable(tsk, mm->user_ns))) {
+	     !ptracer_capable(tsk, task_exec_user_ns(tsk)))) {
 		mmput(mm);
 		return 0;
 	}
@@ -274,18 +275,14 @@ static bool ptrace_has_cap(struct user_namespace *ns, unsigned int mode)
 
 static bool task_still_dumpable(struct task_struct *task, unsigned int mode)
 {
-	struct mm_struct *mm = task->mm;
-
 	if (get_dumpable(task) == SUID_DUMP_USER)
 		return true;
 	/*
-	 * The mm-based fallback is preserved here for one more commit; the
-	 * follow-up that moves user_ns into task_exec_state replaces this
-	 * with a direct task_exec_user_ns() lookup so it works for zombies.
+	 * The task's recorded exec-time user_ns stays valid even after the
+	 * task has gone through exit_mm() and task->mm has been cleared, so
+	 * we no longer need a separate post-exit fallback.
 	 */
-	if (mm)
-		return ptrace_has_cap(mm->user_ns, mode);
-	return ptrace_has_cap(&init_user_ns, mode);
+	return ptrace_has_cap(task_exec_user_ns(task), mode);
 }
 
 /* Returns 0 on success, -errno on denial. */

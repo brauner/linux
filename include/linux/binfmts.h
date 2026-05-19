@@ -25,6 +25,12 @@ struct linux_binprm {
 	struct page *page[MAX_ARG_PAGES];
 #endif
 	struct mm_struct *mm;
+	/*
+	 * The user namespace this exec will publish to task->exec_state.
+	 * Initially the caller's current_user_ns(); may be narrowed by
+	 * would_dump() to the lowest ancestor that contains the executable.
+	 */
+	struct user_namespace *user_ns;
 	unsigned long p; /* current top of mem */
 	unsigned int
 		/* Should an execfd be passed to userspace? */

@@ -9,6 +9,7 @@
 #include <linux/mm.h>
 #include <linux/prctl.h>
 #include <linux/sched.h>
+#include <linux/sched/exec_state.h>
 #include <linux/sched/mm.h>
 #include <linux/string.h>
 #include <linux/swap.h>
@@ -539,7 +540,7 @@ static int access_remote_tags(struct task_struct *tsk, unsigned long addr,
 
 	if (!tsk->ptrace || (current != tsk->parent) ||
 	    ((get_dumpable(tsk) != SUID_DUMP_USER) &&
-	     !ptracer_capable(tsk, mm->user_ns))) {
+	     !ptracer_capable(tsk, task_exec_user_ns(tsk)))) {
 		mmput(mm);
 		return -EPERM;
 	}

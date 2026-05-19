@@ -91,6 +91,7 @@
 #include <linux/sched/mm.h>
 #include <linux/sched/coredump.h>
 #include <linux/sched/debug.h>
+#include <linux/sched/exec_state.h>
 #include <linux/sched/stat.h>
 #include <linux/posix-timers.h>
 #include <linux/time_namespace.h>
@@ -1910,7 +1911,7 @@ void task_dump_owner(struct task_struct *task, umode_t mode,
 			uid = GLOBAL_ROOT_UID;
 			gid = GLOBAL_ROOT_GID;
 		} else if (get_dumpable(task) != SUID_DUMP_USER) {
-			struct user_namespace *user_ns = task->mm->user_ns;
+			struct user_namespace *user_ns = task_exec_user_ns(task);
 
 			uid = make_kuid(user_ns, 0);
 			if (!uid_valid(uid))

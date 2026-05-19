@@ -54,4 +54,12 @@ void put_task_exec_state(struct task_exec_state *es);
 void replace_task_exec_state(struct task_struct *task,
 			     struct task_exec_state *new);
 
+/*
+ * task_exec_user_ns - the user_namespace pinned at the task's last execve().
+ *
+ * Always returns a valid user_namespace.  Falls back to &init_user_ns for
+ * the very early init/kthread path before any task has run execve().
+ */
+struct user_namespace *task_exec_user_ns(struct task_struct *task);
+
 #endif /* _LINUX_SCHED_EXEC_STATE_H */

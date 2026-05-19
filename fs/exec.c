@@ -264,6 +264,13 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	if (!mm)
 		goto err;
 
+	/*
+	 * Snapshot the caller's user_ns for this exec.  This is what will
+	 * be installed on the post-exec task_exec_state once we reach
+	 * begin_new_exec(); would_dump() may narrow it before that point.
+	 */
+	bprm->user_ns = get_user_ns(current_user_ns());
+
 	/* Save current stack limit for all calculations made during exec. */
 	task_lock(current->group_leader);
 	bprm->rlim_stack = current->signal->rlim[RLIMIT_STACK];
@@ -1145,9 +1152,11 @@ int begin_new_exec(struct linux_binprm * bprm)
 
 	/*
 	 * Allocate the fresh exec state now, before exec_mmap() commits to
-	 * the new address space.
+	 * the new address space.  The exec-time user_ns lives here (possibly
+	 * narrowed by would_dump() above) so it survives past exit_mm() for
+	 * ptrace_may_access() and similar.
 	 */
-	new_exec_state = alloc_task_exec_state(current_user_ns());
+	new_exec_state = alloc_task_exec_state(bprm->user_ns);
 	if (!new_exec_state) {
 		retval = -ENOMEM;
 		goto out;
@@ -1315,14 +1324,14 @@ void would_dump(struct linux_binprm *bprm, struct file *file)
 		struct user_namespace *old, *user_ns;
 		bprm->interp_flags |= BINPRM_FLAGS_ENFORCE_NONDUMP;
 
-		/* Ensure mm->user_ns contains the executable */
-		user_ns = old = bprm->mm->user_ns;
+		/* Ensure bprm->user_ns contains the executable. */
+		user_ns = old = bprm->user_ns;
 		while ((user_ns != &init_user_ns) &&
 		       !privileged_wrt_inode_uidgid(user_ns, idmap, inode))
 			user_ns = user_ns->parent;
 
 		if (old != user_ns) {
-			bprm->mm->user_ns = get_user_ns(user_ns);
+			bprm->user_ns = get_user_ns(user_ns);
 			put_user_ns(old);
 		}
 	}
@@ -1392,6 +1401,8 @@ static void free_bprm(struct linux_binprm *bprm)
 		acct_arg_size(bprm, 0);
 		mmput(bprm->mm);
 	}
+	if (bprm->user_ns)
+		put_user_ns(bprm->user_ns);
 	free_arg_pages(bprm);
 	if (bprm->cred) {
 		/* in case exec fails before de_thread() succeeds */
