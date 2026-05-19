@@ -53,7 +53,7 @@ int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
 
 	if (!tsk->ptrace ||
 	    (current != tsk->parent) ||
-	    ((get_dumpable(mm) != SUID_DUMP_USER) &&
+	    ((get_dumpable(tsk) != SUID_DUMP_USER) &&
 	     !ptracer_capable(tsk, mm->user_ns))) {
 		mmput(mm);
 		return 0;
@@ -275,14 +275,16 @@ static bool ptrace_has_cap(struct user_namespace *ns, unsigned int mode)
 static bool task_still_dumpable(struct task_struct *task, unsigned int mode)
 {
 	struct mm_struct *mm = task->mm;
-	if (mm) {
-		if (get_dumpable(mm) == SUID_DUMP_USER)
-			return true;
-		return ptrace_has_cap(mm->user_ns, mode);
-	}
 
-	if (task->user_dumpable)
+	if (get_dumpable(task) == SUID_DUMP_USER)
 		return true;
+	/*
+	 * The mm-based fallback is preserved here for one more commit; the
+	 * follow-up that moves user_ns into task_exec_state replaces this
+	 * with a direct task_exec_user_ns() lookup so it works for zombies.
+	 */
+	if (mm)
+		return ptrace_has_cap(mm->user_ns, mode);
 	return ptrace_has_cap(&init_user_ns, mode);
 }
 

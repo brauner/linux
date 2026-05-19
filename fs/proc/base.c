@@ -1904,25 +1904,21 @@ void task_dump_owner(struct task_struct *task, umode_t mode,
 	 * directories.
 	 */
 	if (mode != (S_IFDIR|S_IRUGO|S_IXUGO)) {
-		struct mm_struct *mm;
 		task_lock(task);
-		mm = task->mm;
-		/* Make non-dumpable tasks owned by some root */
-		if (mm) {
-			if (get_dumpable(mm) != SUID_DUMP_USER) {
-				struct user_namespace *user_ns = mm->user_ns;
-
-				uid = make_kuid(user_ns, 0);
-				if (!uid_valid(uid))
-					uid = GLOBAL_ROOT_UID;
-
-				gid = make_kgid(user_ns, 0);
-				if (!gid_valid(gid))
-					gid = GLOBAL_ROOT_GID;
-			}
-		} else {
+		if (!task->mm) {
+			/* Zombie: no live address space - hide ownership. */
 			uid = GLOBAL_ROOT_UID;
 			gid = GLOBAL_ROOT_GID;
+		} else if (get_dumpable(task) != SUID_DUMP_USER) {
+			struct user_namespace *user_ns = task->mm->user_ns;
+
+			uid = make_kuid(user_ns, 0);
+			if (!uid_valid(uid))
+				uid = GLOBAL_ROOT_UID;
+
+			gid = make_kgid(user_ns, 0);
+			if (!gid_valid(gid))
+				gid = GLOBAL_ROOT_GID;
 		}
 		task_unlock(task);
 	}
@@ -2965,7 +2961,7 @@ static ssize_t proc_coredump_filter_read(struct file *file, char __user *buf,
 	ret = 0;
 	mm = get_task_mm(task);
 	if (mm) {
-		unsigned long flags = __mm_flags_get_dumpable(mm);
+		unsigned long flags = __mm_flags_get_word(mm);
 
 		len = snprintf(buffer, sizeof(buffer), "%08lx\n",
 			       ((flags & MMF_DUMP_FILTER_MASK) >>

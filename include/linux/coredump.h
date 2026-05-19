@@ -20,7 +20,10 @@ struct coredump_params {
 	const kernel_siginfo_t *siginfo;
 	struct file *file;
 	unsigned long limit;
+	/* MMF_DUMP_FILTER_* bits, snapshot of mm->flags at dump start. */
 	unsigned long mm_flags;
+	/* SUID_DUMP_*, snapshot of dumpable at dump start. */
+	int dumpable;
 	int cpu;
 	loff_t written;
 	loff_t pos;

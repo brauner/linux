@@ -35,6 +35,7 @@
 #include <linux/init.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/coredump.h>
+#include <linux/sched/exec_state.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/numa_balancing.h>
 #include <linux/sched/task.h>
@@ -1091,6 +1092,7 @@ void __set_task_comm(struct task_struct *tsk, const char *buf, bool exec)
 int begin_new_exec(struct linux_binprm * bprm)
 {
 	struct task_struct *me = current;
+	struct task_exec_state *new_exec_state;
 	int retval;
 
 	/* Once we are committed compute the creds */
@@ -1142,14 +1144,29 @@ int begin_new_exec(struct linux_binprm * bprm)
 		would_dump(bprm, bprm->executable);
 
 	/*
+	 * Allocate the fresh exec state now, before exec_mmap() commits to
+	 * the new address space.
+	 */
+	new_exec_state = alloc_task_exec_state(current_user_ns());
+	if (!new_exec_state) {
+		retval = -ENOMEM;
+		goto out;
+	}
+
+	/*
 	 * Release all of the old mmap stuff
 	 */
 	acct_arg_size(bprm, 0);
 	retval = exec_mmap(bprm->mm);
-	if (retval)
+	if (retval) {
+		put_task_exec_state(new_exec_state);
 		goto out;
+	}
 
 	bprm->mm = NULL;
+
+	/* The old exec_state describes the pre-exec image and is dropped. */
+	replace_task_exec_state(me, new_exec_state);
 
 	retval = exec_task_namespaces();
 	if (retval)
@@ -1210,9 +1227,9 @@ int begin_new_exec(struct linux_binprm * bprm)
 	if (bprm->interp_flags & BINPRM_FLAGS_ENFORCE_NONDUMP ||
 	    !(uid_eq(current_euid(), current_uid()) &&
 	      gid_eq(current_egid(), current_gid())))
-		set_dumpable(current->mm, suid_dumpable);
+		set_dumpable(current, suid_dumpable);
 	else
-		set_dumpable(current->mm, SUID_DUMP_USER);
+		set_dumpable(current, SUID_DUMP_USER);
 
 	perf_event_exec();
 
@@ -1261,7 +1278,7 @@ int begin_new_exec(struct linux_binprm * bprm)
 	 * wait until new credentials are committed
 	 * by commit_creds() above
 	 */
-	if (get_dumpable(me->mm) != SUID_DUMP_USER)
+	if (get_dumpable(me) != SUID_DUMP_USER)
 		perf_event_exit_task(me);
 	/*
 	 * cred_guard_mutex must be held at least to this point to prevent
@@ -1906,14 +1923,29 @@ void set_binfmt(struct linux_binfmt *new)
 EXPORT_SYMBOL(set_binfmt);
 
 /*
- * set_dumpable stores three-value SUID_DUMP_* into mm->flags.
+ * set_dumpable stores three-value SUID_DUMP_* into task->exec_state.
+ * Safe to call on any task; if @task has no exec_state yet (only possible
+ * during very early fork failure paths), the call is a no-op.
  */
-void set_dumpable(struct mm_struct *mm, int value)
+void set_dumpable(struct task_struct *task, int value)
 {
+	struct task_exec_state *es;
+
 	if (WARN_ON((unsigned)value > SUID_DUMP_ROOT))
 		return;
 
-	__mm_flags_set_mask_dumpable(mm, value);
+	es = task->exec_state;
+	if (es)
+		WRITE_ONCE(es->dumpable, value);
+}
+
+int get_dumpable(struct task_struct *task)
+{
+	struct task_exec_state *es = task->exec_state;
+
+	if (!es)
+		return SUID_DUMP_USER;
+	return READ_ONCE(es->dumpable);
 }
 
 static inline struct user_arg_ptr native_arg(const char __user *const __user *p)
