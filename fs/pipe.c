@@ -27,6 +27,7 @@
 #include <linux/watch_queue.h>
 #include <linux/sysctl.h>
 #include <linux/sort.h>
+#include <linux/xattr.h>
 
 #include <linux/uaccess.h>
 #include <asm/ioctls.h>
@@ -883,6 +884,90 @@ static const struct dentry_operations pipefs_dentry_operations = {
 
 static const struct file_operations pipeanon_fops;
 
+struct pipefs_inode {
+	struct list_head		xattrs;
+	struct simple_xattr_limits	xattr_limits;
+	struct inode			vfs_inode;
+};
+
+static inline struct pipefs_inode *PIPEFS_I(struct inode *inode)
+{
+	return container_of(inode, struct pipefs_inode, vfs_inode);
+}
+
+static struct kmem_cache *pipefs_inode_cachep __ro_after_init;
+
+static struct simple_xattr_cache pipefs_xa_cache;
+
+static struct inode *pipefs_alloc_inode(struct super_block *sb)
+{
+	struct pipefs_inode *pi;
+
+	pi = alloc_inode_sb(sb, pipefs_inode_cachep, GFP_KERNEL);
+	if (!pi)
+		return NULL;
+	INIT_LIST_HEAD_RCU(&pi->xattrs);
+	simple_xattr_limits_init(&pi->xattr_limits);
+	return &pi->vfs_inode;
+}
+
+static void pipefs_evict_inode(struct inode *inode)
+{
+	simple_xattrs_free(&pipefs_xa_cache, &PIPEFS_I(inode)->xattrs, NULL);
+	clear_inode(inode);
+}
+
+static void pipefs_free_inode(struct inode *inode)
+{
+	kmem_cache_free(pipefs_inode_cachep, PIPEFS_I(inode));
+}
+
+static int pipefs_user_xattr_get(const struct xattr_handler *handler,
+				 struct dentry *dentry, struct inode *inode,
+				 const char *suffix, void *value, size_t size)
+{
+	const char *name = xattr_full_name(handler, suffix);
+
+	return simple_xattr_get(&pipefs_xa_cache, &PIPEFS_I(inode)->xattrs,
+				name, value, size);
+}
+
+static int pipefs_user_xattr_set(const struct xattr_handler *handler,
+				 struct mnt_idmap *idmap,
+				 struct dentry *dentry, struct inode *inode,
+				 const char *suffix, const void *value,
+				 size_t size, int flags)
+{
+	const char *name = xattr_full_name(handler, suffix);
+	struct pipefs_inode *pi = PIPEFS_I(inode);
+
+	return simple_xattr_set_limited(&pipefs_xa_cache, &pi->xattrs,
+					&pi->xattr_limits, name, value, size,
+					flags);
+}
+
+static const struct xattr_handler pipefs_user_xattr_handler = {
+	.prefix = XATTR_USER_PREFIX,
+	.get = pipefs_user_xattr_get,
+	.set = pipefs_user_xattr_set,
+};
+
+static const struct xattr_handler * const pipefs_xattr_handlers[] = {
+	&pipefs_user_xattr_handler,
+	NULL
+};
+
+static ssize_t pipefs_listxattr(struct dentry *dentry, char *buffer, size_t size)
+{
+	struct inode *inode = d_inode(dentry);
+
+	return simple_xattr_list(inode, &PIPEFS_I(inode)->xattrs, buffer, size);
+}
+
+static const struct inode_operations pipefs_inode_operations = {
+	.listxattr = pipefs_listxattr,
+};
+
 static struct inode * get_pipe_inode(void)
 {
 	struct inode *inode = new_inode_pseudo(pipe_mnt->mnt_sb);
@@ -901,6 +986,7 @@ static struct inode * get_pipe_inode(void)
 	pipe->files = 2;
 	pipe->readers = pipe->writers = 1;
 	inode->i_fop = &pipeanon_fops;
+	inode->i_op = &pipefs_inode_operations;
 
 	/*
 	 * Mark the inode dirty from the very beginning,
@@ -1452,7 +1538,9 @@ long pipe_fcntl(struct file *file, unsigned int cmd, unsigned int arg)
 }
 
 static const struct super_operations pipefs_ops = {
-	.destroy_inode = free_inode_nonrcu,
+	.alloc_inode = pipefs_alloc_inode,
+	.destroy_inode = pipefs_free_inode,
+	.evict_inode = pipefs_evict_inode,
 	.statfs = simple_statfs,
 };
 
@@ -1470,6 +1558,7 @@ static int pipefs_init_fs_context(struct fs_context *fc)
 		return -ENOMEM;
 	ctx->ops = &pipefs_ops;
 	ctx->dops = &pipefs_dentry_operations;
+	ctx->xattr = pipefs_xattr_handlers;
 	return 0;
 }
 
@@ -1532,10 +1621,25 @@ static const struct ctl_table fs_pipe_sysctls[] = {
 };
 #endif
 
+static void pipefs_inode_init_once(void *foo)
+{
+	struct pipefs_inode *pi = foo;
+
+	inode_init_once(&pi->vfs_inode);
+}
+
 static int __init init_pipe_fs(void)
 {
-	int err = register_filesystem(&pipe_fs_type);
+	int err;
 
+	pipefs_inode_cachep = kmem_cache_create("pipefs_inode_cache",
+						sizeof(struct pipefs_inode), 0,
+						SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
+						SLAB_ACCOUNT, pipefs_inode_init_once);
+	if (!pipefs_inode_cachep)
+		return -ENOMEM;
+
+	err = register_filesystem(&pipe_fs_type);
 	if (!err) {
 		pipe_mnt = kern_mount(&pipe_fs_type);
 		if (IS_ERR(pipe_mnt)) {
