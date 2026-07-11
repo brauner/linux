@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/types.h>
+#include <pthread.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdio.h>
@@ -19,6 +20,10 @@
 
 #include "pidfd.h"
 #include "kselftest_harness.h"
+
+#ifndef SETNS_ALL
+#define SETNS_ALL 0x00000001
+#endif
 
 enum {
 	PIDFD_NS_USER,
@@ -393,6 +398,34 @@ static int in_same_namespace(int ns_fd1, pid_t pid2, const char *ns)
 	return 0;
 }
 
+/* Mask of target namespaces differing from the caller's per /proc/<pid>/ns/. */
+static int expected_setns_all_mask(const int *nsfds, pid_t target)
+{
+	unsigned int mask = 0;
+	int i, ret;
+
+	for (i = 0; i < PIDFD_NS_MAX; i++) {
+		const struct ns_info *info = &ns_info[i];
+
+		if (!info->flag || nsfds[i] < 0)
+			continue;
+
+		ret = in_same_namespace(nsfds[i], target, info->name);
+		if (ret < 0)
+			return -1;
+		if (ret == 0)
+			mask |= info->flag;
+	}
+
+	return mask;
+}
+
+static void *pause_thread(void *arg)
+{
+	pause();
+	return NULL;
+}
+
 /* Test that we can't pass garbage to the kernel. */
 TEST_F(current_nsset, invalid_flags)
 {
@@ -654,6 +687,288 @@ TEST_F(current_nsset, no_foul_play)
 		       info->name, self->child_pid2,
 		       self->child_pidfd_derived_nsfds2[i]);
 	}
+}
+
+/* Test that SETNS_ALL joins all differing namespaces and returns their mask. */
+TEST_F(current_nsset, setns_all_full_join)
+{
+	int expected, ret;
+	int i;
+	pid_t pid;
+
+	expected = expected_setns_all_mask(self->nsfds, self->child_pid1);
+	ASSERT_GT(expected, 0);
+
+	ret = setns(self->child_pidfd1, SETNS_ALL);
+	ASSERT_EQ(ret, expected) {
+		TH_LOG("%m - Failed to SETNS_ALL to namespaces of %d via pidfd %d",
+		       self->child_pid1, self->child_pidfd1);
+	}
+
+	pid = getpid();
+	for (i = 0; i < PIDFD_NS_MAX; i++) {
+		const struct ns_info *info = &ns_info[i];
+		int nsfd;
+
+		if (self->child_nsfds1[i] < 0)
+			continue;
+
+		/* Verify that we have changed to the correct namespaces. */
+		if (info->flag == CLONE_NEWPID)
+			nsfd = self->nsfds[i];
+		else
+			nsfd = self->child_nsfds1[i];
+		ASSERT_EQ(in_same_namespace(nsfd, pid, info->name), 1) {
+			TH_LOG("SETNS_ALL failed to place us correctly into %s namespace of %d",
+			       info->name, self->child_pid1);
+		}
+	}
+}
+
+/* Test that SETNS_ALL skips namespaces shared with the target. */
+TEST_F(current_nsset, setns_all_same_userns)
+{
+	int expected, ret;
+	int ipc_sockets[2];
+	int child_pidfd;
+	pid_t child_pid;
+	pid_t pid;
+	char c;
+
+	if (geteuid())
+		SKIP(return, "Test requires root");
+	if (self->nsfds[PIDFD_NS_UTS] < 0 || self->nsfds[PIDFD_NS_IPC] < 0 ||
+	    self->nsfds[PIDFD_NS_NET] < 0)
+		SKIP(return, "Required namespaces are not available");
+
+	ret = socketpair(AF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0, ipc_sockets);
+	ASSERT_EQ(ret, 0);
+
+	/* Create a target that shares our user namespace. */
+	child_pid = create_child(&child_pidfd, 0);
+	EXPECT_GE(child_pid, 0);
+
+	if (child_pid == 0) {
+		close(ipc_sockets[0]);
+
+		if (unshare(CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET) < 0)
+			_exit(EXIT_FAILURE);
+
+		if (write_nointr(ipc_sockets[1], "1", 1) < 0)
+			_exit(EXIT_FAILURE);
+
+		close(ipc_sockets[1]);
+
+		pause();
+		_exit(EXIT_SUCCESS);
+	}
+
+	close(ipc_sockets[1]);
+	ASSERT_EQ(read_nointr(ipc_sockets[0], &c, 1), 1);
+	close(ipc_sockets[0]);
+
+	expected = expected_setns_all_mask(self->nsfds, child_pid);
+	ASSERT_EQ(expected, CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET);
+
+	ret = setns(child_pidfd, SETNS_ALL);
+	ASSERT_EQ(ret, expected) {
+		TH_LOG("%m - Failed to SETNS_ALL to namespaces of %d via pidfd %d",
+		       child_pid, child_pidfd);
+	}
+
+	pid = getpid();
+	/* The shared user namespace must have been skipped. */
+	if (self->nsfds[PIDFD_NS_USER] >= 0)
+		ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_USER], pid, "user"), 1);
+	/* Verify that we have changed to the correct namespaces. */
+	ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_UTS], pid, "uts"), 0);
+	ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_IPC], pid, "ipc"), 0);
+	ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_NET], pid, "net"), 0);
+
+	ASSERT_EQ(sys_pidfd_send_signal(child_pidfd, SIGKILL, NULL, 0), 0);
+	ASSERT_EQ(sys_waitid(P_PID, child_pid, NULL, WEXITED), 0);
+	close(child_pidfd);
+}
+
+/* Test that SETNS_ALL on a target sharing everything changes nothing. */
+TEST_F(current_nsset, setns_all_self)
+{
+	int i;
+	pid_t pid;
+
+	ASSERT_EQ(setns(self->pidfd, SETNS_ALL), 0);
+
+	pid = getpid();
+	for (i = 0; i < PIDFD_NS_MAX; i++) {
+		const struct ns_info *info = &ns_info[i];
+		/* Verify that we haven't changed any namespaces. */
+		if (self->nsfds[i] >= 0)
+			ASSERT_EQ(in_same_namespace(self->nsfds[i], pid, info->name), 1);
+	}
+
+	/* An identical active time namespace is skipped even with a pending unshare. */
+	if (self->nsfds[PIDFD_NS_TIMECLD] >= 0 && geteuid() == 0) {
+		int timecld;
+
+		ASSERT_EQ(unshare(CLONE_NEWTIME), 0);
+		timecld = preserve_ns(pid, "time_for_children");
+		ASSERT_GE(timecld, 0);
+
+		ASSERT_EQ(setns(self->pidfd, SETNS_ALL), 0);
+
+		/* Verify that the pending time namespace has been preserved. */
+		ASSERT_EQ(in_same_namespace(timecld, pid, "time_for_children"), 1);
+		close(timecld);
+	}
+}
+
+/* Test that SETNS_ALL can be restricted to a subset of namespaces. */
+TEST_F(current_nsset, setns_all_subset)
+{
+	int expected, ret;
+	pid_t pid;
+
+	if (self->nsfds[PIDFD_NS_UTS] < 0 || self->nsfds[PIDFD_NS_NET] < 0)
+		SKIP(return, "Required namespaces are not available");
+
+	expected = expected_setns_all_mask(self->nsfds, self->child_pid1);
+	ASSERT_GT(expected, 0);
+	ASSERT_EQ(expected & (CLONE_NEWUTS | CLONE_NEWNET),
+		  CLONE_NEWUTS | CLONE_NEWNET);
+
+	ret = setns(self->child_pidfd1, SETNS_ALL | CLONE_NEWUTS | CLONE_NEWNET);
+	ASSERT_EQ(ret, CLONE_NEWUTS | CLONE_NEWNET) {
+		TH_LOG("%m - Failed to SETNS_ALL to uts and net namespace of %d via pidfd %d",
+		       self->child_pid1, self->child_pidfd1);
+	}
+
+	pid = getpid();
+	/* Verify that we have changed to the correct namespaces. */
+	ASSERT_EQ(in_same_namespace(self->child_nsfds1[PIDFD_NS_UTS], pid, "uts"), 1);
+	ASSERT_EQ(in_same_namespace(self->child_nsfds1[PIDFD_NS_NET], pid, "net"), 1);
+	/* Verify that no other namespace has been joined. */
+	if (self->nsfds[PIDFD_NS_USER] >= 0)
+		ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_USER], pid, "user"), 1);
+	if (self->nsfds[PIDFD_NS_MNT] >= 0)
+		ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_MNT], pid, "mnt"), 1);
+	if (self->nsfds[PIDFD_NS_IPC] >= 0)
+		ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_IPC], pid, "ipc"), 1);
+
+	/* An identical user namespace is skipped, not rejected. */
+	if (self->nsfds[PIDFD_NS_USER] >= 0) {
+		ASSERT_EQ(setns(self->pidfd, SETNS_ALL | CLONE_NEWUSER), 0);
+		ASSERT_EQ(in_same_namespace(self->nsfds[PIDFD_NS_USER], pid, "user"), 1);
+	}
+}
+
+/* Test that SETNS_ALL rejects invalid combinations and file descriptors. */
+TEST_F(current_nsset, setns_all_invalid)
+{
+	int fd;
+
+	/* Non-namespace flags are rejected. */
+	ASSERT_NE(setns(self->pidfd, SETNS_ALL | CLONE_VM), 0);
+	EXPECT_EQ(errno, EINVAL);
+
+	/* SETNS_ALL is only valid with pidfds. */
+	if (self->nsfds[PIDFD_NS_NET] >= 0) {
+		ASSERT_NE(setns(self->nsfds[PIDFD_NS_NET], SETNS_ALL), 0);
+		EXPECT_EQ(errno, EINVAL);
+	}
+
+	fd = sys_memfd_create("rostock", 0);
+	EXPECT_GT(fd, 0);
+
+	ASSERT_NE(setns(fd, SETNS_ALL), 0);
+	EXPECT_EQ(errno, EINVAL);
+	close(fd);
+}
+
+/* Test that SETNS_ALL fails on a target that has already exited. */
+TEST_F(current_nsset, setns_all_exited_child)
+{
+	int i;
+	pid_t pid;
+
+	ASSERT_NE(setns(self->child_pidfd_exited, SETNS_ALL), 0);
+	EXPECT_EQ(errno, ESRCH);
+
+	pid = getpid();
+	for (i = 0; i < PIDFD_NS_MAX; i++) {
+		const struct ns_info *info = &ns_info[i];
+		/* Verify that we haven't changed any namespaces. */
+		if (self->nsfds[i] >= 0)
+			ASSERT_EQ(in_same_namespace(self->nsfds[i], pid, info->name), 1);
+	}
+}
+
+/* Test that a failing install leaves all namespaces untouched. */
+TEST_F(current_nsset, setns_all_atomic)
+{
+	int expected, ret;
+	int ipc_sockets[2];
+	int child_pidfd;
+	pid_t child_pid;
+	pthread_t thread;
+	pid_t pid;
+	int i;
+	char c;
+
+	if (geteuid())
+		SKIP(return, "Test requires root");
+	if (self->nsfds[PIDFD_NS_UTS] < 0 || self->nsfds[PIDFD_NS_NET] < 0 ||
+	    self->nsfds[PIDFD_NS_TIME] < 0)
+		SKIP(return, "Required namespaces are not available");
+
+	ret = socketpair(AF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0, ipc_sockets);
+	ASSERT_EQ(ret, 0);
+
+	/* Create a target whose time namespace join must fail. */
+	child_pid = create_child(&child_pidfd, 0);
+	EXPECT_GE(child_pid, 0);
+
+	if (child_pid == 0) {
+		close(ipc_sockets[0]);
+
+		if (unshare(CLONE_NEWUTS | CLONE_NEWNET) < 0)
+			_exit(EXIT_FAILURE);
+		if (!switch_timens())
+			_exit(EXIT_FAILURE);
+
+		if (write_nointr(ipc_sockets[1], "1", 1) < 0)
+			_exit(EXIT_FAILURE);
+
+		close(ipc_sockets[1]);
+
+		pause();
+		_exit(EXIT_SUCCESS);
+	}
+
+	close(ipc_sockets[1]);
+	ASSERT_EQ(read_nointr(ipc_sockets[0], &c, 1), 1);
+	close(ipc_sockets[0]);
+
+	expected = expected_setns_all_mask(self->nsfds, child_pid);
+	ASSERT_EQ(expected, CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWTIME);
+
+	/* A second thread makes joining the time namespace fail with EUSERS. */
+	ASSERT_EQ(pthread_create(&thread, NULL, pause_thread, NULL), 0);
+
+	ret = setns(child_pidfd, SETNS_ALL);
+	ASSERT_EQ(ret, -1);
+	EXPECT_EQ(errno, EUSERS);
+
+	pid = getpid();
+	for (i = 0; i < PIDFD_NS_MAX; i++) {
+		const struct ns_info *info = &ns_info[i];
+		/* Verify that we haven't changed any namespaces. */
+		if (self->nsfds[i] >= 0)
+			ASSERT_EQ(in_same_namespace(self->nsfds[i], pid, info->name), 1);
+	}
+
+	ASSERT_EQ(sys_pidfd_send_signal(child_pidfd, SIGKILL, NULL, 0), 0);
+	ASSERT_EQ(sys_waitid(P_PID, child_pid, NULL, WEXITED), 0);
+	close(child_pidfd);
 }
 
 TEST(setns_einval)
