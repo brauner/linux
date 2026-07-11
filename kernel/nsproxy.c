@@ -433,6 +433,47 @@ static void setns_target_put(struct setns_target *target)
 		put_nsproxy(target->nsproxy);
 }
 
+/* Namespaces of the target that differ from the caller's, in install order. */
+static unsigned int setns_target_diff(const struct setns_target *target)
+{
+	struct nsproxy *nsp = target->nsproxy;
+	struct nsproxy *cur = current->nsproxy;
+	unsigned int flags = 0;
+
+	if (target->user_ns != current_user_ns())
+		flags |= CLONE_NEWUSER;
+	if (nsp->mnt_ns != cur->mnt_ns)
+		flags |= CLONE_NEWNS;
+	if (nsp->uts_ns != cur->uts_ns)
+		flags |= CLONE_NEWUTS;
+	if (nsp->ipc_ns != cur->ipc_ns)
+		flags |= CLONE_NEWIPC;
+	if (target->pid_ns != task_active_pid_ns(current))
+		flags |= CLONE_NEWPID;
+	if (nsp->cgroup_ns != cur->cgroup_ns)
+		flags |= CLONE_NEWCGROUP;
+	if (nsp->net_ns != cur->net_ns)
+		flags |= CLONE_NEWNET;
+	if (nsp->time_ns != cur->time_ns)
+		flags |= CLONE_NEWTIME;
+
+	return flags;
+}
+
+static int setns_resolve_flags(const struct setns_target *target, int *flags)
+{
+	unsigned int consider = *flags & ~SETNS_ALL;
+
+	/* No consistent snapshot of a target that is being unhashed. */
+	if (!target->pid_ns)
+		return -ESRCH;
+
+	if (!consider)
+		consider = CLONE_NS_ALL;
+	*flags = setns_target_diff(target) & consider;
+	return 0;
+}
+
 /*
  * This is the inverse operation to unshare().
  * Ordering is equivalent to the standard ordering used everywhere else
@@ -571,6 +612,7 @@ SYSCALL_DEFINE2(setns, int, fd, int, flags)
 	struct setns_target target = {};
 	struct nsset nsset = {};
 	struct pid *pid = NULL;
+	int joined = 0;
 	int err = 0;
 
 	if (fd_empty(f))
@@ -583,7 +625,14 @@ SYSCALL_DEFINE2(setns, int, fd, int, flags)
 		flags = ns->ns_type;
 	} else if (!IS_ERR(pidfd_pid(fd_file(f)))) {
 		pid = pidfd_pid(fd_file(f));
-		err = check_setns_flags(flags);
+		if (flags & SETNS_ALL) {
+			int rest = flags & ~SETNS_ALL;
+
+			if (rest)
+				err = check_setns_flags(rest);
+		} else {
+			err = check_setns_flags(flags);
+		}
 	} else {
 		err = -EINVAL;
 	}
@@ -594,6 +643,13 @@ SYSCALL_DEFINE2(setns, int, fd, int, flags)
 		err = setns_target_get(pid, &target);
 		if (err)
 			goto out;
+
+		if (flags & SETNS_ALL) {
+			err = setns_resolve_flags(&target, &flags);
+			if (err || !flags)
+				goto out_target;
+			joined = flags;
+		}
 	}
 
 	err = prepare_nsset(flags, &nsset);
@@ -613,7 +669,7 @@ out_target:
 	if (pid)
 		setns_target_put(&target);
 out:
-	return err;
+	return err ?: joined;
 }
 
 int __init nsproxy_cache_init(void)

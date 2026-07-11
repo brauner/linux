@@ -53,6 +53,12 @@
  */
 #define UNSHARE_EMPTY_MNTNS 0x00100000 /* Unshare an empty mount namespace. */
 
+/*
+ * setns flags share the bit space with clone flags but only apply to the
+ * setns syscall:
+ */
+#define SETNS_ALL 0x00000001 /* Join each namespace of the target that differs from the caller's. */
+
 #ifndef __ASSEMBLY__
 /**
  * struct clone_args - arguments for the clone3 syscall
