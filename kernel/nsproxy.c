@@ -389,6 +389,50 @@ static inline int validate_ns(struct nsset *nsset, struct ns_common *ns)
 	return ns->ops->install(nsset, ns);
 }
 
+/* Point-in-time snapshot of the target task's namespaces. */
+struct setns_target {
+	struct nsproxy *nsproxy;
+	struct user_namespace *user_ns;
+	struct pid_namespace *pid_ns;
+};
+
+static int setns_target_get(struct pid *pid, struct setns_target *target)
+{
+	struct task_struct *tsk;
+
+	guard(rcu)();
+	tsk = pid_task(pid, PIDTYPE_PID);
+	if (!tsk)
+		return -ESRCH;
+
+	if (!ptrace_may_access(tsk, PTRACE_MODE_READ_REALCREDS))
+		return -EPERM;
+
+	scoped_guard(task_lock, tsk) {
+		target->nsproxy = tsk->nsproxy;
+		if (target->nsproxy)
+			get_nsproxy(target->nsproxy);
+	}
+	if (!target->nsproxy)
+		return -ESRCH;
+
+	/* May be NULL if the target is unhashed concurrently. */
+	target->pid_ns = task_active_pid_ns(tsk);
+	if (target->pid_ns)
+		get_pid_ns(target->pid_ns);
+	target->user_ns = get_user_ns(__task_cred(tsk)->user_ns);
+	return 0;
+}
+
+static void setns_target_put(struct setns_target *target)
+{
+	if (target->pid_ns)
+		put_pid_ns(target->pid_ns);
+	put_user_ns(target->user_ns);
+	if (target->nsproxy)
+		put_nsproxy(target->nsproxy);
+}
+
 /*
  * This is the inverse operation to unshare().
  * Ordering is equivalent to the standard ordering used everywhere else
@@ -396,55 +440,15 @@ static inline int validate_ns(struct nsset *nsset, struct ns_common *ns)
  * namespaces occurs at the point of no return after installation of
  * all requested namespaces was successful in commit_nsset().
  */
-static int validate_nsset(struct nsset *nsset, struct pid *pid)
+static int validate_nsset(struct nsset *nsset, const struct setns_target *target)
 {
-	int ret = 0;
-	unsigned flags = nsset->flags;
-	struct user_namespace *user_ns = NULL;
-	struct pid_namespace *pid_ns = NULL;
-	struct nsproxy *nsp;
-	struct task_struct *tsk;
+	int ret;
+	unsigned int flags = nsset->flags;
+	struct nsproxy *nsp = target->nsproxy;
 
-	/* Take a "snapshot" of the target task's namespaces. */
-	rcu_read_lock();
-	tsk = pid_task(pid, PIDTYPE_PID);
-	if (!tsk) {
-		rcu_read_unlock();
+	/* The target was unhashed before its active pid namespace could be sampled. */
+	if ((flags & CLONE_NEWPID) && !target->pid_ns)
 		return -ESRCH;
-	}
-
-	if (!ptrace_may_access(tsk, PTRACE_MODE_READ_REALCREDS)) {
-		rcu_read_unlock();
-		return -EPERM;
-	}
-
-	task_lock(tsk);
-	nsp = tsk->nsproxy;
-	if (nsp)
-		get_nsproxy(nsp);
-	task_unlock(tsk);
-	if (!nsp) {
-		rcu_read_unlock();
-		return -ESRCH;
-	}
-
-#ifdef CONFIG_PID_NS
-	if (flags & CLONE_NEWPID) {
-		pid_ns = task_active_pid_ns(tsk);
-		if (unlikely(!pid_ns)) {
-			rcu_read_unlock();
-			ret = -ESRCH;
-			goto out;
-		}
-		get_pid_ns(pid_ns);
-	}
-#endif
-
-#ifdef CONFIG_USER_NS
-	if (flags & CLONE_NEWUSER)
-		user_ns = get_user_ns(__task_cred(tsk)->user_ns);
-#endif
-	rcu_read_unlock();
 
 	/*
 	 * Install requested namespaces. The caller will have
@@ -454,23 +458,23 @@ static int validate_nsset(struct nsset *nsset, struct pid *pid)
 	 */
 #ifdef CONFIG_USER_NS
 	if (flags & CLONE_NEWUSER) {
-		ret = validate_ns(nsset, &user_ns->ns);
+		ret = validate_ns(nsset, &target->user_ns->ns);
 		if (ret)
-			goto out;
+			return ret;
 	}
 #endif
 
 	if (flags & CLONE_NEWNS) {
 		ret = validate_ns(nsset, from_mnt_ns(nsp->mnt_ns));
 		if (ret)
-			goto out;
+			return ret;
 	}
 
 #ifdef CONFIG_UTS_NS
 	if (flags & CLONE_NEWUTS) {
 		ret = validate_ns(nsset, &nsp->uts_ns->ns);
 		if (ret)
-			goto out;
+			return ret;
 	}
 #endif
 
@@ -478,15 +482,15 @@ static int validate_nsset(struct nsset *nsset, struct pid *pid)
 	if (flags & CLONE_NEWIPC) {
 		ret = validate_ns(nsset, &nsp->ipc_ns->ns);
 		if (ret)
-			goto out;
+			return ret;
 	}
 #endif
 
 #ifdef CONFIG_PID_NS
 	if (flags & CLONE_NEWPID) {
-		ret = validate_ns(nsset, &pid_ns->ns);
+		ret = validate_ns(nsset, &target->pid_ns->ns);
 		if (ret)
-			goto out;
+			return ret;
 	}
 #endif
 
@@ -494,7 +498,7 @@ static int validate_nsset(struct nsset *nsset, struct pid *pid)
 	if (flags & CLONE_NEWCGROUP) {
 		ret = validate_ns(nsset, &nsp->cgroup_ns->ns);
 		if (ret)
-			goto out;
+			return ret;
 	}
 #endif
 
@@ -502,7 +506,7 @@ static int validate_nsset(struct nsset *nsset, struct pid *pid)
 	if (flags & CLONE_NEWNET) {
 		ret = validate_ns(nsset, &nsp->net_ns->ns);
 		if (ret)
-			goto out;
+			return ret;
 	}
 #endif
 
@@ -510,18 +514,11 @@ static int validate_nsset(struct nsset *nsset, struct pid *pid)
 	if (flags & CLONE_NEWTIME) {
 		ret = validate_ns(nsset, &nsp->time_ns->ns);
 		if (ret)
-			goto out;
+			return ret;
 	}
 #endif
 
-out:
-	if (pid_ns)
-		put_pid_ns(pid_ns);
-	if (nsp)
-		put_nsproxy(nsp);
-	put_user_ns(user_ns);
-
-	return ret;
+	return 0;
 }
 
 /*
@@ -571,7 +568,9 @@ SYSCALL_DEFINE2(setns, int, fd, int, flags)
 {
 	CLASS(fd, f)(fd);
 	struct ns_common *ns = NULL;
+	struct setns_target target = {};
 	struct nsset nsset = {};
+	struct pid *pid = NULL;
 	int err = 0;
 
 	if (fd_empty(f))
@@ -583,6 +582,7 @@ SYSCALL_DEFINE2(setns, int, fd, int, flags)
 			err = -EINVAL;
 		flags = ns->ns_type;
 	} else if (!IS_ERR(pidfd_pid(fd_file(f)))) {
+		pid = pidfd_pid(fd_file(f));
 		err = check_setns_flags(flags);
 	} else {
 		err = -EINVAL;
@@ -590,19 +590,28 @@ SYSCALL_DEFINE2(setns, int, fd, int, flags)
 	if (err)
 		goto out;
 
+	if (pid) {
+		err = setns_target_get(pid, &target);
+		if (err)
+			goto out;
+	}
+
 	err = prepare_nsset(flags, &nsset);
 	if (err)
-		goto out;
+		goto out_target;
 
-	if (proc_ns_file(fd_file(f)))
-		err = validate_ns(&nsset, ns);
+	if (pid)
+		err = validate_nsset(&nsset, &target);
 	else
-		err = validate_nsset(&nsset, pidfd_pid(fd_file(f)));
+		err = validate_ns(&nsset, ns);
 	if (!err) {
 		commit_nsset(&nsset);
 		perf_event_namespaces(current);
 	}
 	put_nsset(&nsset);
+out_target:
+	if (pid)
+		setns_target_put(&target);
 out:
 	return err;
 }
