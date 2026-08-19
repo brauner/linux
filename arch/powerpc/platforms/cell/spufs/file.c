@@ -956,10 +956,12 @@ spufs_signal1_release(struct inode *inode, struct file *file)
 static ssize_t spufs_signal1_dump(struct spu_context *ctx,
 		struct coredump_params *cprm)
 {
+	u32 data;
+
 	if (!ctx->csa.spu_chnlcnt_RW[3])
 		return 0;
-	return spufs_dump_emit(cprm, &ctx->csa.spu_chnldata_RW[3],
-			       sizeof(ctx->csa.spu_chnldata_RW[3]));
+	data = ctx->csa.spu_chnldata_RW[3];
+	return spufs_dump_emit(cprm, &data, sizeof(data));
 }
 
 static ssize_t __spufs_signal1_read(struct spu_context *ctx, char __user *buf,
@@ -1089,10 +1091,12 @@ spufs_signal2_release(struct inode *inode, struct file *file)
 static ssize_t spufs_signal2_dump(struct spu_context *ctx,
 		struct coredump_params *cprm)
 {
+	u32 data;
+
 	if (!ctx->csa.spu_chnlcnt_RW[4])
 		return 0;
-	return spufs_dump_emit(cprm, &ctx->csa.spu_chnldata_RW[4],
-			       sizeof(ctx->csa.spu_chnldata_RW[4]));
+	data = ctx->csa.spu_chnldata_RW[4];
+	return spufs_dump_emit(cprm, &data, sizeof(data));
 }
 
 static ssize_t __spufs_signal2_read(struct spu_context *ctx, char __user *buf,
@@ -1965,10 +1969,12 @@ static const struct file_operations spufs_mbox_info_fops = {
 static ssize_t spufs_ibox_info_dump(struct spu_context *ctx,
 		struct coredump_params *cprm)
 {
+	u32 data;
+
 	if (!(ctx->csa.prob.mb_stat_R & 0xff0000))
 		return 0;
-	return spufs_dump_emit(cprm, &ctx->csa.priv2.puint_mb_R,
-			       sizeof(ctx->csa.priv2.puint_mb_R));
+	data = ctx->csa.priv2.puint_mb_R;
+	return spufs_dump_emit(cprm, &data, sizeof(data));
 }
 
 static ssize_t spufs_ibox_info_read(struct file *file, char __user *buf,
