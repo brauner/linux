@@ -207,6 +207,12 @@ extern bool in_userns(const struct user_namespace *ancestor,
 		       const struct user_namespace *child);
 extern bool current_in_userns(const struct user_namespace *target_ns);
 struct ns_common *ns_get_owner(struct ns_common *ns);
+
+#if IS_ENABLED(CONFIG_USER_NS_MAP_KUNIT_TEST)
+extern int insert_extent(struct uid_gid_map *map, struct uid_gid_extent *extent);
+extern int sort_idmaps(struct uid_gid_map *map);
+#endif /* CONFIG_USER_NS_MAP_KUNIT_TEST */
+
 #else
 
 static inline struct user_namespace *get_user_ns(struct user_namespace *ns)
