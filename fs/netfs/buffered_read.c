@@ -242,7 +242,7 @@ static void netfs_mark_copy_to_cache(struct netfs_io_request *rreq,
 
 		if (overlap > 0 && copy) {
 			folio = folioq_folio(*fq, *slot);
-			if (unlikely(test_bit(NETFS_RREQ_USE_PGPRIV2, &rreq->flags))) {
+			if (netfs_using_pgpriv2(rreq)) {
 				if (!folio_test_private_2(folio))
 					folio_start_private_2(folio);
 			} else {
