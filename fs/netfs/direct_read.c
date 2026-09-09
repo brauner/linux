@@ -47,8 +47,8 @@ static void netfs_prepare_dio_read_iterator(struct netfs_io_subrequest *subreq)
  */
 static void netfs_dispatch_unbuffered_reads(struct netfs_io_request *rreq)
 {
-	unsigned long long start = rreq->start;
 	ssize_t size = rreq->len;
+	uoff_t start = rreq->start;
 	int ret;
 
 	do {
