@@ -33,7 +33,7 @@ int netfs_prefetch_for_write(struct file *file, struct folio *folio,
  * buffered_write.c
  */
 void netfs_update_i_size(struct netfs_inode *ctx, struct inode *inode,
-			 loff_t pos, size_t copied);
+			 uoff_t pos, size_t copied);
 
 /*
  * main.c
@@ -86,7 +86,7 @@ void netfs_wait_for_put_ra_refs(struct netfs_io_request *rreq);
  */
 struct netfs_io_request *netfs_alloc_request(struct address_space *mapping,
 					     struct file *file,
-					     loff_t start, size_t len,
+					     uoff_t start, size_t len,
 					     enum netfs_io_origin origin);
 void netfs_get_request(struct netfs_io_request *rreq, enum netfs_rreq_ref_trace what);
 void netfs_clear_subrequests(struct netfs_io_request *rreq);
@@ -203,11 +203,11 @@ void netfs_write_collection_worker(struct work_struct *work);
  */
 struct netfs_io_request *netfs_create_write_req(struct address_space *mapping,
 						struct file *file,
-						loff_t start,
+						uoff_t start,
 						enum netfs_io_origin origin);
 void netfs_prepare_write(struct netfs_io_request *wreq,
 			 struct netfs_io_stream *stream,
-			 loff_t start);
+			 uoff_t start);
 void netfs_reissue_write(struct netfs_io_stream *stream,
 			 struct netfs_io_subrequest *subreq,
 			 struct iov_iter *source);
@@ -215,7 +215,7 @@ void netfs_issue_write(struct netfs_io_request *wreq,
 		       struct netfs_io_stream *stream);
 size_t netfs_advance_write(struct netfs_io_request *wreq,
 			   struct netfs_io_stream *stream,
-			   loff_t start, size_t len, bool to_eof);
+			   uoff_t start, size_t len, bool to_eof);
 struct netfs_io_request *netfs_begin_writethrough(struct kiocb *iocb, size_t len);
 int netfs_advance_writethrough(struct netfs_io_request *wreq, struct writeback_control *wbc,
 			       struct folio *folio, size_t copied, bool to_page_end,

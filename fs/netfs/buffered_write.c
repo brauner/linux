@@ -17,7 +17,7 @@
  * as possible to hold as much of the remaining length as possible in one go.
  */
 static struct folio *netfs_grab_folio_for_write(struct address_space *mapping,
-						loff_t pos, size_t part)
+						uoff_t pos, size_t part)
 {
 	pgoff_t index = pos / PAGE_SIZE;
 	fgf_t fgp_flags = FGP_WRITEBEGIN;
@@ -35,9 +35,9 @@ static struct folio *netfs_grab_folio_for_write(struct address_space *mapping,
  * the values actually are.
  */
 void netfs_update_i_size(struct netfs_inode *ctx, struct inode *inode,
-			 loff_t pos, size_t copied)
+			 uoff_t pos, size_t copied)
 {
-	loff_t i_size, end = pos + copied;
+	uoff_t i_size, end = pos + copied;
 	blkcnt_t add;
 	size_t gap;
 
@@ -102,7 +102,7 @@ ssize_t netfs_perform_write(struct kiocb *iocb, struct iov_iter *iter,
 	struct folio *folio = NULL, *writethrough = NULL;
 	unsigned int bdp_flags = (iocb->ki_flags & IOCB_NOWAIT) ? BDP_ASYNC : 0;
 	ssize_t written = 0, ret, ret2;
-	loff_t pos = iocb->ki_pos;
+	uoff_t pos = iocb->ki_pos;
 	size_t max_chunk = mapping_max_folio_size(mapping);
 	bool maybe_trouble = false;
 
@@ -134,7 +134,7 @@ ssize_t netfs_perform_write(struct kiocb *iocb, struct iov_iter *iter,
 		enum netfs_folio_trace trace;
 		struct netfs_folio *finfo;
 		struct netfs_group *group;
-		unsigned long long fpos;
+		uoff_t fpos;
 		size_t flen;
 		size_t offset;	/* Offset into pagecache folio */
 		size_t part;	/* Bytes to write to folio */

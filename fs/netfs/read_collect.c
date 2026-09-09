@@ -153,8 +153,8 @@ static void netfs_read_unlock_folios(struct netfs_io_request *rreq,
 				     unsigned int *notes)
 {
 	struct folio_queue *folioq = rreq->buffer.tail;
-	unsigned long long collected_to = rreq->collected_to;
 	unsigned int slot = rreq->buffer.first_tail_slot;
+	uoff_t collected_to = rreq->collected_to;
 
 	if (rreq->cleaned_to >= rreq->collected_to)
 		return;
@@ -179,7 +179,7 @@ static void netfs_read_unlock_folios(struct netfs_io_request *rreq,
 
 	for (;;) {
 		struct folio *folio;
-		unsigned long long fpos, fend;
+		uoff_t fpos, fend;
 		size_t fsize;
 
 		folio = folioq_folio(folioq, slot);

@@ -75,7 +75,7 @@ static void netfs_retry_read_subrequests(struct netfs_io_request *rreq)
 	do {
 		struct netfs_io_subrequest *from, *to, *tmp;
 		struct iov_iter source;
-		unsigned long long start, len;
+		uoff_t start, len;
 		size_t part;
 		bool boundary = false, subreq_superfluous = false;
 

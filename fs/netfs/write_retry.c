@@ -55,7 +55,7 @@ static void netfs_retry_write_stream(struct netfs_io_request *wreq,
 	do {
 		struct netfs_io_subrequest *subreq = NULL, *from, *to, *tmp;
 		struct iov_iter source;
-		unsigned long long start, len;
+		uoff_t start, len;
 		size_t part;
 		bool boundary = false;
 

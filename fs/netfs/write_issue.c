@@ -89,7 +89,7 @@ static void netfs_kill_dirty_pages(struct address_space *mapping,
  */
 struct netfs_io_request *netfs_create_write_req(struct address_space *mapping,
 						struct file *file,
-						loff_t start,
+						uoff_t start,
 						enum netfs_io_origin origin)
 {
 	struct netfs_io_request *wreq;
@@ -156,7 +156,7 @@ EXPORT_SYMBOL(netfs_prepare_write_failed);
  */
 void netfs_prepare_write(struct netfs_io_request *wreq,
 			 struct netfs_io_stream *stream,
-			 loff_t start)
+			 uoff_t start)
 {
 	struct netfs_io_subrequest *subreq;
 	struct iov_iter *wreq_iter = &wreq->buffer.iter;
@@ -279,7 +279,7 @@ void netfs_issue_write(struct netfs_io_request *wreq,
  */
 size_t netfs_advance_write(struct netfs_io_request *wreq,
 			   struct netfs_io_stream *stream,
-			   loff_t start, size_t len, bool to_eof)
+			   uoff_t start, size_t len, bool to_eof)
 {
 	struct netfs_io_subrequest *subreq = stream->construct;
 	size_t part;
@@ -330,7 +330,7 @@ static int netfs_write_folio(struct netfs_io_request *wreq,
 	struct netfs_folio *finfo;
 	size_t iter_off = 0;
 	size_t fsize = folio_size(folio), flen = fsize, foff = 0;
-	loff_t fpos = folio_pos(folio), i_size;
+	uoff_t fpos = folio_pos(folio), i_size;
 	bool to_eof = false, streamw = false;
 	bool debug = false;
 
@@ -721,7 +721,7 @@ static int netfs_write_folio_single(struct netfs_io_request *wreq,
 	struct netfs_io_stream *stream;
 	size_t iter_off = 0;
 	size_t fsize = folio_size(folio), flen;
-	loff_t fpos = folio_pos(folio);
+	uoff_t fpos = folio_pos(folio);
 	ssize_t ret;
 	bool to_eof = false;
 	bool no_debug = false;
