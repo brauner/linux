@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include <kunit/visibility.h>
 #include <linux/export.h>
 #include <linux/nsproxy.h>
 #include <linux/slab.h>
@@ -783,7 +784,8 @@ static bool mappings_overlap(struct uid_gid_map *new_map,
  * Takes care to allocate a 4K block of memory if the number of mappings exceeds
  * UID_GID_MAP_MAX_BASE_EXTENTS.
  */
-static int insert_extent(struct uid_gid_map *map, struct uid_gid_extent *extent)
+VISIBLE_IF_KUNIT int insert_extent(struct uid_gid_map *map,
+				   struct uid_gid_extent *extent)
 {
 	struct uid_gid_extent *dest;
 
@@ -806,15 +808,20 @@ static int insert_extent(struct uid_gid_map *map, struct uid_gid_extent *extent)
 		map->reverse = NULL;
 	}
 
-	if (map->nr_extents < UID_GID_MAP_MAX_BASE_EXTENTS)
-		dest = &map->extent[map->nr_extents];
+	/*
+	 * nr_extents must be updated before the extent and forward arrays are
+	 * accessed, otherwise KSAN will assert an out-of-bounds error.
+	 */
+	map->nr_extents++;
+	if (map->nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS)
+		dest = &map->extent[map->nr_extents - 1];
 	else
-		dest = &map->forward[map->nr_extents];
+		dest = &map->forward[map->nr_extents - 1];
 
 	*dest = *extent;
-	map->nr_extents++;
 	return 0;
 }
+EXPORT_SYMBOL_IF_KUNIT(insert_extent);
 
 /* cmp function to sort() forward mappings */
 static int cmp_extents_forward(const void *a, const void *b)
@@ -850,7 +857,7 @@ static int cmp_extents_reverse(const void *a, const void *b)
  * sort_idmaps - Sorts an array of idmap entries.
  * Can only be called if number of mappings exceeds UID_GID_MAP_MAX_BASE_EXTENTS.
  */
-static int sort_idmaps(struct uid_gid_map *map)
+VISIBLE_IF_KUNIT int sort_idmaps(struct uid_gid_map *map)
 {
 	if (map->nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS)
 		return 0;
@@ -871,6 +878,7 @@ static int sort_idmaps(struct uid_gid_map *map)
 
 	return 0;
 }
+EXPORT_SYMBOL_IF_KUNIT(sort_idmaps);
 
 /**
  * verify_root_map() - check the uid 0 mapping
