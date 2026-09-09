@@ -67,7 +67,7 @@ int netfs_folio_written_back(struct folio *folio)
 		/* Streaming writes cannot be redirtied whilst under writeback,
 		 * so discard the streaming record.
 		 */
-		unsigned long long fend;
+		uoff_t fend;
 
 		fend = folio_pos(folio) + finfo->dirty_offset + finfo->dirty_len;
 		spin_lock(&ictx->inode.i_lock);
@@ -115,8 +115,8 @@ static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 					  unsigned int *notes)
 {
 	struct folio_queue *folioq = wreq->buffer.tail;
-	unsigned long long collected_to = wreq->collected_to;
 	unsigned int slot = wreq->buffer.first_tail_slot;
+	uoff_t collected_to = wreq->collected_to;
 
 	if (WARN_ON_ONCE(!folioq)) {
 		pr_err("[!] Writeback unlock found empty rolling buffer!\n");
@@ -140,7 +140,7 @@ static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 	for (;;) {
 		struct folio *folio;
 		struct netfs_folio *finfo;
-		unsigned long long fpos, fend;
+		uoff_t fpos, fend;
 		size_t fsize, flen;
 
 		folio = folioq_folio(folioq, slot);
@@ -154,7 +154,7 @@ static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 		finfo = netfs_folio_info(folio);
 		flen = finfo ? finfo->dirty_offset + finfo->dirty_len : fsize;
 
-		fend = min_t(unsigned long long, fpos + flen, wreq->i_size);
+		fend = min_t(uoff_t, fpos + flen, wreq->i_size);
 
 		trace_netfs_collect_folio(wreq, folio, fend, collected_to);
 
@@ -201,8 +201,8 @@ static void netfs_collect_write_results(struct netfs_io_request *wreq)
 {
 	struct netfs_io_subrequest *front, *remove;
 	struct netfs_io_stream *stream;
-	unsigned long long collected_to, issued_to;
 	unsigned int notes;
+	uoff_t collected_to, issued_to;
 	int s;
 
 	_enter("%llx-%llx", wreq->start, wreq->start + wreq->len);
