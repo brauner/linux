@@ -117,8 +117,11 @@ retry:
 	if (d_is_negative(subdir)) {
 		ret = cachefiles_has_space(cache, 1, 0,
 					   cachefiles_has_space_for_create);
-		if (ret < 0)
+		if (ret < 0) {
+			if (ret == -ENOBUFS)
+				trace_cachefiles_no_space(NULL, cachefiles_trace_mkdir_nospace);
 			goto mkdir_error;
+		}
 
 		_debug("attempt mkdir");
 
@@ -487,8 +490,11 @@ static bool cachefiles_create_file(struct cachefiles_object *object)
 
 	ret = cachefiles_has_space(object->volume->cache, 1, 0,
 				   cachefiles_has_space_for_create);
-	if (ret < 0)
+	if (ret < 0) {
+		if (ret == -ENOBUFS)
+			trace_cachefiles_no_space(object, cachefiles_trace_create_nospace);
 		return false;
+	}
 
 	file = cachefiles_create_tmpfile(object);
 	if (IS_ERR(file))
