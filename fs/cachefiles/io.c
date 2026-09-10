@@ -375,19 +375,23 @@ static int cachefiles_write(struct netfs_cache_resources *cres,
 				  term_func, term_func_priv);
 }
 
-static inline enum netfs_io_source
-cachefiles_do_prepare_read(struct netfs_cache_resources *cres,
-			   uoff_t start, size_t *_len, loff_t i_size,
-			   unsigned long *_flags, ino_t netfs_ino)
+/*
+ * Prepare a read operation, shortening it to a cached/uncached boundary as
+ * appropriate.
+ */
+static enum netfs_io_source
+cachefiles_prepare_read(struct netfs_io_subrequest *subreq, uoff_t i_size)
 {
 	enum cachefiles_prepare_read_trace why;
+	struct netfs_cache_resources *cres = &subreq->rreq->cache_resources;
 	struct cachefiles_object *object = NULL;
 	struct cachefiles_cache *cache;
 	struct fscache_cookie *cookie = fscache_cres_cookie(cres);
 	const struct cred *saved_cred;
 	struct file *file = cachefiles_cres_file(cres);
 	enum netfs_io_source ret = NETFS_DOWNLOAD_FROM_SERVER;
-	size_t len = *_len;
+	uoff_t start = subreq->start;
+	size_t len = subreq->len;
 	loff_t off, to;
 	ino_t ino = file ? file_inode(file)->i_ino : 0;
 
@@ -400,7 +404,7 @@ cachefiles_do_prepare_read(struct netfs_cache_resources *cres,
 	}
 
 	if (test_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags)) {
-		__set_bit(NETFS_SREQ_COPY_TO_CACHE, _flags);
+		__set_bit(NETFS_SREQ_COPY_TO_CACHE, &subreq->flags);
 		why = cachefiles_trace_read_no_data;
 		goto out_no_object;
 	}
@@ -441,7 +445,7 @@ cachefiles_do_prepare_read(struct netfs_cache_resources *cres,
 	if (off > start) {
 		off = round_up(off, cache->bsize);
 		len = off - start;
-		*_len = len;
+		subreq->len = len;
 		why = cachefiles_trace_read_found_part;
 		goto download_and_store;
 	}
@@ -462,7 +466,7 @@ cachefiles_do_prepare_read(struct netfs_cache_resources *cres,
 		else
 			to = round_down(to, cache->bsize);
 		len = to - start;
-		*_len = len;
+		subreq->len = len;
 	}
 
 	why = cachefiles_trace_read_have_data;
@@ -470,24 +474,13 @@ cachefiles_do_prepare_read(struct netfs_cache_resources *cres,
 	goto out;
 
 download_and_store:
-	__set_bit(NETFS_SREQ_COPY_TO_CACHE, _flags);
+	__set_bit(NETFS_SREQ_COPY_TO_CACHE, &subreq->flags);
 out:
 	cachefiles_end_secure(cache, saved_cred);
 out_no_object:
-	trace_cachefiles_prep_read(object, start, len, *_flags, ret, why, ino, netfs_ino);
+	trace_cachefiles_prep_read(object, start, len, subreq->flags, ret, why,
+				   ino, subreq->rreq->inode->i_ino);
 	return ret;
-}
-
-/*
- * Prepare a read operation, shortening it to a cached/uncached
- * boundary as appropriate.
- */
-static enum netfs_io_source cachefiles_prepare_read(struct netfs_io_subrequest *subreq,
-						    uoff_t i_size)
-{
-	return cachefiles_do_prepare_read(&subreq->rreq->cache_resources,
-					  subreq->start, &subreq->len, i_size,
-					  &subreq->flags, subreq->rreq->inode->i_ino);
 }
 
 /*
