@@ -102,6 +102,7 @@ struct task_struct;
 void put_files_struct(struct files_struct *fs);
 void switch_files_struct(struct task_struct *tsk, struct files_struct *files);
 int unshare_files(void);
+int unshare_fd(unsigned long unshare_flags, struct files_struct **new_fdp);
 enum fd_range_flags {
 	/* Leave behind all descriptors outside of the specified range. */
 	FD_RANGE_EXCEPT		= (1U << 0),
