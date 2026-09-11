@@ -859,14 +859,14 @@ static int hci_uart_tty_ioctl(struct tty_struct *tty, unsigned int cmd,
 /*
  * We don't provide read/write/poll interface for user space.
  */
-static ssize_t hci_uart_tty_read(struct tty_struct *tty, struct file *file,
+static ssize_t hci_uart_tty_read(struct tty_struct *tty, struct kiocb *iocb,
 				 u8 *buf, size_t nr, void **cookie,
 				 unsigned long offset)
 {
 	return 0;
 }
 
-static ssize_t hci_uart_tty_write(struct tty_struct *tty, struct file *file,
+static ssize_t hci_uart_tty_write(struct tty_struct *tty, struct kiocb *iocb,
 				  const u8 *data, size_t count)
 {
 	return 0;

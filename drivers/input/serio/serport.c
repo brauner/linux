@@ -149,7 +149,7 @@ static void serport_ldisc_receive(struct tty_struct *tty, const u8 *cp,
  * returning 0 characters.
  */
 
-static ssize_t serport_ldisc_read(struct tty_struct * tty, struct file * file,
+static ssize_t serport_ldisc_read(struct tty_struct *tty, struct kiocb *iocb,
 				  u8 *kbuf, size_t nr, void **cookie,
 				  unsigned long offset)
 {

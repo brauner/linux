@@ -3746,7 +3746,7 @@ static void gsmld_write_wakeup(struct tty_struct *tty)
  *	This code must be sure never to sleep through a hangup.
  */
 
-static ssize_t gsmld_read(struct tty_struct *tty, struct file *file, u8 *buf,
+static ssize_t gsmld_read(struct tty_struct *tty, struct kiocb *iocb, u8 *buf,
 			  size_t nr, void **cookie, unsigned long offset)
 {
 	return -EOPNOTSUPP;
@@ -3766,7 +3766,7 @@ static ssize_t gsmld_read(struct tty_struct *tty, struct file *file, u8 *buf,
  *	avoids pain user side.
  */
 
-static ssize_t gsmld_write(struct tty_struct *tty, struct file *file,
+static ssize_t gsmld_write(struct tty_struct *tty, struct kiocb *iocb,
 			   const u8 *buf, size_t nr)
 {
 	struct gsm_mux *gsm = tty->disc_data;

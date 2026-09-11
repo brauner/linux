@@ -2076,9 +2076,9 @@ static void canon_skip_eof(struct n_tty_data *ldata)
 /**
  * job_control		-	check job control
  * @tty: tty
- * @file: file handle
+ * @iocb: the read's kiocb
  *
- * Perform job control management checks on this @file/@tty descriptor and if
+ * Perform job control management checks on this @iocb/@tty descriptor and if
  * appropriate send any needed signals and return a negative error code if
  * action should be taken.
  *
@@ -2087,8 +2087,10 @@ static void canon_skip_eof(struct n_tty_data *ldata)
  *  * current->signal->tty check is safe
  *  * ctrl.lock to safely reference @tty->ctrl.pgrp
  */
-static int job_control(struct tty_struct *tty, struct file *file)
+static int job_control(struct tty_struct *tty, struct kiocb *iocb)
 {
+	struct file *file = iocb->ki_filp;
+
 	/* Job control check -- must be done at start and after
 	   every sleep (POSIX.1 7.1.1.4). */
 	/* NOTE: not yet done after every sleep pending a thorough
@@ -2134,12 +2136,12 @@ static ssize_t n_tty_continue_cookie(struct tty_struct *tty, u8 *kbuf,
 	return kb - kbuf;
 }
 
-static int n_tty_wait_for_input(struct tty_struct *tty, struct file *file,
+static int n_tty_wait_for_input(struct tty_struct *tty, struct kiocb *iocb,
 				struct wait_queue_entry *wait, long *timeout)
 {
 	if (test_bit(TTY_OTHER_CLOSED, &tty->flags))
 		return -EIO;
-	if (tty_hung_up_p(file))
+	if (tty_hung_up_p(iocb->ki_filp))
 		return 0;
 	/*
 	 * Abort readers for ttys which never actually get hung up.
@@ -2149,7 +2151,7 @@ static int n_tty_wait_for_input(struct tty_struct *tty, struct file *file,
 		return 0;
 	if (!*timeout)
 		return 0;
-	if (tty_io_nonblock(tty, file))
+	if (tty_io_nonblock(tty, iocb))
 		return -EAGAIN;
 	if (signal_pending(current))
 		return -ERESTARTSYS;
@@ -2181,7 +2183,7 @@ static int n_tty_wait_for_input(struct tty_struct *tty, struct file *file,
  *	claims non-exclusive termios_rwsem;
  *	publishes read_tail
  */
-static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,
+static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb, u8 *kbuf,
 			  size_t nr, void **cookie, unsigned long offset)
 {
 	struct n_tty_data *ldata = tty->disc_data;
@@ -2197,14 +2199,14 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,
 	if (*cookie)
 		return n_tty_continue_cookie(tty, kbuf, nr, cookie);
 
-	retval = job_control(tty, file);
+	retval = job_control(tty, iocb);
 	if (retval < 0)
 		return retval;
 
 	/*
 	 *	Internal serialization of reads.
 	 */
-	if (file->f_flags & O_NONBLOCK) {
+	if (iocb->ki_filp->f_flags & O_NONBLOCK) {
 		if (!mutex_trylock(&ldata->atomic_read_lock))
 			return -EAGAIN;
 	} else {
@@ -2250,7 +2252,7 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,
 			tty_buffer_flush_work(tty->port);
 			down_read(&tty->termios_rwsem);
 			if (!input_available_p(tty, 0)) {
-				int ret = n_tty_wait_for_input(tty, file, &wait,
+				int ret = n_tty_wait_for_input(tty, iocb, &wait,
 							       &timeout);
 				if (ret <= 0) {
 					retval = ret;
@@ -2315,7 +2317,7 @@ more_to_be_read:
 /**
  * n_tty_write		-	write function for tty
  * @tty: tty device
- * @file: file object
+ * @iocb: the write's kiocb
  * @buf: userspace buffer pointer
  * @nr: size of I/O
  *
@@ -2332,9 +2334,10 @@ more_to_be_read:
  *	 (note that the process_output*() functions take this lock themselves)
  */
 
-static ssize_t n_tty_write(struct tty_struct *tty, struct file *file,
+static ssize_t n_tty_write(struct tty_struct *tty, struct kiocb *iocb,
 			   const u8 *buf, size_t nr)
 {
+	struct file *file = iocb->ki_filp;
 	const u8 *b = buf;
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	ssize_t num, retval = 0;
@@ -2398,7 +2401,7 @@ static ssize_t n_tty_write(struct tty_struct *tty, struct file *file,
 		}
 		if (!nr)
 			break;
-		if (tty_io_nonblock(tty, file)) {
+		if (tty_io_nonblock(tty, iocb)) {
 			retval = -EAGAIN;
 			break;
 		}

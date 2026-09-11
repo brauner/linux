@@ -414,7 +414,7 @@ static void n_hdlc_tty_receive(struct tty_struct *tty, const u8 *data,
  *
  * Returns the number of bytes returned or error code.
  */
-static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
+static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct kiocb *iocb,
 			       u8 *kbuf, size_t nr, void **cookie,
 			       unsigned long offset)
 {
@@ -435,7 +435,7 @@ static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
 			ret = -EIO;
 			break;
 		}
-		if (tty_hung_up_p(file))
+		if (tty_hung_up_p(iocb->ki_filp))
 			break;
 
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -445,7 +445,7 @@ static ssize_t n_hdlc_tty_read(struct tty_struct *tty, struct file *file,
 			break;
 
 		/* no data */
-		if (tty_io_nonblock(tty, file)) {
+		if (tty_io_nonblock(tty, iocb)) {
 			ret = -EAGAIN;
 			break;
 		}
@@ -501,13 +501,13 @@ done_with_rbuf:
 /**
  * n_hdlc_tty_write - write a single frame of data to device
  * @tty: pointer to associated tty device instance data
- * @file: pointer to file object data
+ * @iocb: the write's kiocb
  * @data: pointer to transmit data (one frame)
  * @count: size of transmit frame in bytes
  *
  * Returns the number of bytes written (or error code).
  */
-static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct file *file,
+static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct kiocb *iocb,
 				const u8 *data, size_t count)
 {
 	struct n_hdlc *n_hdlc = tty->disc_data;
@@ -533,7 +533,7 @@ static ssize_t n_hdlc_tty_write(struct tty_struct *tty, struct file *file,
 		if (tbuf)
 			break;
 
-		if (tty_io_nonblock(tty, file)) {
+		if (tty_io_nonblock(tty, iocb)) {
 			error = -EAGAIN;
 			break;
 		}

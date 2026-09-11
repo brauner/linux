@@ -188,7 +188,7 @@ ppp_sync_close(struct tty_struct *tty)
  * Pppd reads and writes packets via /dev/ppp instead.
  */
 static ssize_t
-ppp_sync_read(struct tty_struct *tty, struct file *file, u8 *buf, size_t count,
+ppp_sync_read(struct tty_struct *tty, struct kiocb *iocb, u8 *buf, size_t count,
 	      void **cookie, unsigned long offset)
 {
 	return -EAGAIN;
@@ -199,7 +199,7 @@ ppp_sync_read(struct tty_struct *tty, struct file *file, u8 *buf, size_t count,
  * from the ppp generic stuff.
  */
 static ssize_t
-ppp_sync_write(struct tty_struct *tty, struct file *file, const u8 *buf,
+ppp_sync_write(struct tty_struct *tty, struct kiocb *iocb, const u8 *buf,
 	       size_t count)
 {
 	return -EAGAIN;

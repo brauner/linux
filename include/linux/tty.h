@@ -320,9 +320,9 @@ enum tty_struct_flags {
 	TTY_LDISC_HALTED,
 };
 
-static inline bool tty_io_nonblock(struct tty_struct *tty, struct file *file)
+static inline bool tty_io_nonblock(struct tty_struct *tty, struct kiocb *iocb)
 {
-	return file->f_flags & O_NONBLOCK ||
+	return iocb->ki_filp->f_flags & O_NONBLOCK ||
 		test_bit(TTY_LDISC_CHANGING, &tty->flags);
 }
 
