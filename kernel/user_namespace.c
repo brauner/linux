@@ -780,12 +780,13 @@ static bool mappings_overlap(struct uid_gid_map *new_map,
 }
 
 /*
- * insert_extent - Safely insert a new idmap extent into struct uid_gid_map.
+ * uid_gid_map_insert_extent - Safely insert a new idmap extent into
+ * struct uid_gid_map.
  * Takes care to allocate a 4K block of memory if the number of mappings exceeds
  * UID_GID_MAP_MAX_BASE_EXTENTS.
  */
-VISIBLE_IF_KUNIT int insert_extent(struct uid_gid_map *map,
-				   struct uid_gid_extent *extent)
+VISIBLE_IF_KUNIT int uid_gid_map_insert_extent(struct uid_gid_map *map,
+					       struct uid_gid_extent *extent)
 {
 	struct uid_gid_extent *dest;
 
@@ -821,7 +822,7 @@ VISIBLE_IF_KUNIT int insert_extent(struct uid_gid_map *map,
 	*dest = *extent;
 	return 0;
 }
-EXPORT_SYMBOL_IF_KUNIT(insert_extent);
+EXPORT_SYMBOL_IF_KUNIT(uid_gid_map_insert_extent);
 
 /* cmp function to sort() forward mappings */
 static int cmp_extents_forward(const void *a, const void *b)
@@ -854,10 +855,10 @@ static int cmp_extents_reverse(const void *a, const void *b)
 }
 
 /*
- * sort_idmaps - Sorts an array of idmap entries.
+ * uid_gid_map_sort - Sorts an array of idmap entries.
  * Can only be called if number of mappings exceeds UID_GID_MAP_MAX_BASE_EXTENTS.
  */
-VISIBLE_IF_KUNIT int sort_idmaps(struct uid_gid_map *map)
+VISIBLE_IF_KUNIT int uid_gid_map_sort(struct uid_gid_map *map)
 {
 	if (map->nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS)
 		return 0;
@@ -878,7 +879,7 @@ VISIBLE_IF_KUNIT int sort_idmaps(struct uid_gid_map *map)
 
 	return 0;
 }
-EXPORT_SYMBOL_IF_KUNIT(sort_idmaps);
+EXPORT_SYMBOL_IF_KUNIT(uid_gid_map_sort);
 
 /**
  * verify_root_map() - check the uid 0 mapping
@@ -1047,7 +1048,7 @@ static ssize_t map_write(struct file *file, const char __user *buf,
 		    (next_line != NULL))
 			goto out;
 
-		ret = insert_extent(&new_map, &extent);
+		ret = uid_gid_map_insert_extent(&new_map, &extent);
 		if (ret < 0)
 			goto out;
 		ret = -EINVAL;
@@ -1091,7 +1092,7 @@ static ssize_t map_write(struct file *file, const char __user *buf,
 	 * If we want to use binary search for lookup, this clones the extent
 	 * array and sorts both copies.
 	 */
-	ret = sort_idmaps(&new_map);
+	ret = uid_gid_map_sort(&new_map);
 	if (ret < 0)
 		goto out;
 

@@ -209,8 +209,9 @@ extern bool current_in_userns(const struct user_namespace *target_ns);
 struct ns_common *ns_get_owner(struct ns_common *ns);
 
 #if IS_ENABLED(CONFIG_USER_NS_MAP_KUNIT_TEST)
-extern int insert_extent(struct uid_gid_map *map, struct uid_gid_extent *extent);
-extern int sort_idmaps(struct uid_gid_map *map);
+extern int uid_gid_map_insert_extent(struct uid_gid_map *map,
+				     struct uid_gid_extent *extent);
+extern int uid_gid_map_sort(struct uid_gid_map *map);
 #endif /* CONFIG_USER_NS_MAP_KUNIT_TEST */
 
 #else
