@@ -2047,6 +2047,7 @@ static int tty_open(struct inode *inode, struct file *filp)
 	unsigned saved_flags = filp->f_flags;
 
 	nonseekable_open(inode, filp);
+	filp->f_mode |= FMODE_NOWAIT;
 
 retry_open:
 	retval = tty_alloc_file(filp);

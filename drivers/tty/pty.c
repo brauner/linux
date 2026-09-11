@@ -770,6 +770,7 @@ static int ptmx_open(struct inode *inode, struct file *filp)
 	int index;
 
 	nonseekable_open(inode, filp);
+	filp->f_mode |= FMODE_NOWAIT;
 
 	/* We refuse fsnotify events on ptmx, since it's a shared resource */
 	file_set_fsnotify_mode(filp, FMODE_NONOTIFY);
