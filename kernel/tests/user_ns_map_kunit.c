@@ -24,7 +24,7 @@ static void user_ns_map_insert(struct kunit *test)
 		extent.lower_first = i * 100;
 		extent.count = 5;
 
-		ret = insert_extent(&map, &extent);
+		ret = uid_gid_map_insert_extent(&map, &extent);
 		KUNIT_ASSERT_EQ(test, ret, 0);
 	}
 
@@ -54,14 +54,14 @@ static void user_ns_map_insert_extended(struct kunit *test)
 		extent.lower_first = value * 100;
 		extent.count = 5;
 
-		ret = insert_extent(&map, &extent);
+		ret = uid_gid_map_insert_extent(&map, &extent);
 		KUNIT_ASSERT_EQ(test, ret, 0);
 	}
 
 	KUNIT_EXPECT_EQ(test, map.nr_extents, NR_EXTENTS);
 
 	/* Now sort the map to set up reverse mapping */
-	ret = sort_idmaps(&map);
+	ret = uid_gid_map_sort(&map);
 	KUNIT_ASSERT_EQ(test, ret, 0);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, map.reverse);
 
