@@ -2173,7 +2173,7 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb,
 	/*
 	 *	Internal serialization of reads.
 	 */
-	if (iocb->ki_filp->f_flags & O_NONBLOCK) {
+	if (tty_io_nonblock(tty, iocb)) {
 		if (!mutex_trylock(&ldata->atomic_read_lock))
 			return -EAGAIN;
 	} else {
@@ -2238,12 +2238,29 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb,
 		}
 
 		if (!input_available_p(tty, 0)) {
-			up_read(&tty->termios_rwsem);
-			tty_buffer_flush_work(tty->port);
-			down_read(&tty->termios_rwsem);
+			/*
+			 * Push any pending input through first. IOCB_NOWAIT
+			 * skips that and relies on the wakeup once the input
+			 * is there. Once the other end of a pty has closed
+			 * the read fails with -EIO instead, flush then too.
+			 */
+			bool skip_flush = (iocb->ki_flags & IOCB_NOWAIT) &&
+				!test_bit(TTY_OTHER_CLOSED, &tty->flags);
+
+			if (!skip_flush) {
+				up_read(&tty->termios_rwsem);
+				tty_buffer_flush_work(tty->port);
+				down_read(&tty->termios_rwsem);
+			}
 			if (!input_available_p(tty, 0)) {
-				int ret = n_tty_wait_for_input(tty, iocb, &wait,
-							       &timeout);
+				int ret;
+
+				/* the other end closed after the check above */
+				if (skip_flush &&
+				    test_bit(TTY_OTHER_CLOSED, &tty->flags))
+					continue;
+				ret = n_tty_wait_for_input(tty, iocb, &wait,
+							   &timeout);
 				if (ret <= 0) {
 					retval = ret;
 					break;

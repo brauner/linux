@@ -299,7 +299,8 @@ struct tty_file_private {
  *
  * @TTY_LDISC_CHANGING:
  *	Line discipline for this TTY is being changed. I/O should not block
- *	when this is set. Use tty_io_nonblock() to check.
+ *	when this is set. Use tty_io_nonblock() to check, it also covers
+ *	O_NONBLOCK and IOCB_NOWAIT.
  *
  * @TTY_LDISC_HALTED:
  *	Line discipline for this TTY was stopped. No work should be queued to
@@ -323,6 +324,7 @@ enum tty_struct_flags {
 static inline bool tty_io_nonblock(struct tty_struct *tty, struct kiocb *iocb)
 {
 	return iocb->ki_filp->f_flags & O_NONBLOCK ||
+		iocb->ki_flags & IOCB_NOWAIT ||
 		test_bit(TTY_LDISC_CHANGING, &tty->flags);
 }
 

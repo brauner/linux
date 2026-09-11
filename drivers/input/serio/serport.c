@@ -146,7 +146,7 @@ static void serport_ldisc_receive(struct tty_struct *tty, const u8 *cp,
 /*
  * serport_ldisc_read() just waits indefinitely if everything goes well.
  * However, when the serio driver closes the serio port, it finishes,
- * returning 0 characters.
+ * returning 0 characters. IOCB_NOWAIT can't wait for that.
  */
 
 static ssize_t serport_ldisc_read(struct tty_struct *tty, struct kiocb *iocb,
@@ -154,6 +154,9 @@ static ssize_t serport_ldisc_read(struct tty_struct *tty, struct kiocb *iocb,
 {
 	struct serport *serport = tty->disc_data;
 	struct serio *serio;
+
+	if (iocb->ki_flags & IOCB_NOWAIT)
+		return -EAGAIN;
 
 	if (test_and_set_bit(SERPORT_BUSY, &serport->flags))
 		return -EBUSY;

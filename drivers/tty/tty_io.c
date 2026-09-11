@@ -823,6 +823,33 @@ static void tty_update_time(struct tty_struct *tty, bool mtime)
 	}
 }
 
+/*
+ * Get the ldisc for a read or write. Waits for an ldisc change to finish,
+ * unless the I/O is O_NONBLOCK or IOCB_NOWAIT, then it fails with -EAGAIN.
+ * Returns NULL with @ret untouched if the tty is hung up.
+ *
+ * Not tty_io_nonblock(), a pending ldisc change is no reason to fail blocking
+ * I/O that doesn't hold the ldisc yet, and so isn't holding up the change.
+ */
+static struct tty_ldisc *tty_ldisc_ref_io(struct tty_struct *tty,
+					  struct kiocb *iocb, ssize_t *ret)
+{
+	struct tty_ldisc *ld;
+
+	if (!(iocb->ki_filp->f_flags & O_NONBLOCK) &&
+	    !(iocb->ki_flags & IOCB_NOWAIT))
+		return tty_ldisc_ref_wait(tty);
+
+	if (!ldsem_down_read_trylock(&tty->ldisc_sem)) {
+		*ret = -EAGAIN;
+		return NULL;
+	}
+	ld = tty->ldisc;
+	if (!ld)
+		ldsem_up_read(&tty->ldisc_sem);
+	return ld;
+}
+
 /**
  * tty_read - read method for tty device files
  * @iocb: kernel I/O control block
@@ -841,19 +868,16 @@ static ssize_t tty_read(struct kiocb *iocb, struct iov_iter *to)
 	struct inode *inode = file_inode(file);
 	struct tty_struct *tty = file_tty(file);
 	struct tty_ldisc *ld;
-	ssize_t ret;
+	ssize_t ret = 0;
 
 	if (tty_paranoia_check(tty, inode, "tty_read"))
 		return -EIO;
 	if (!tty || tty_io_error(tty))
 		return -EIO;
 
-	/* We want to wait for the line discipline to sort out in this
-	 * situation.
-	 */
-	ld = tty_ldisc_ref_wait(tty);
+	ld = tty_ldisc_ref_io(tty, iocb, &ret);
 	if (!ld)
-		return hung_up_tty_read(iocb, to);
+		return ret ? ret : hung_up_tty_read(iocb, to);
 	ret = -EIO;
 	if (ld->ops->read)
 		ret = ld->ops->read(tty, iocb, to);
@@ -892,7 +916,7 @@ static ssize_t iterate_tty_write(struct tty_ldisc *ld, struct tty_struct *tty,
 	size_t chunk, count = iov_iter_count(from);
 	ssize_t ret, written = 0;
 
-	ret = tty_write_lock(tty, iocb->ki_filp->f_flags & O_NDELAY);
+	ret = tty_write_lock(tty, tty_io_nonblock(tty, iocb));
 	if (ret < 0)
 		return ret;
 
@@ -983,9 +1007,10 @@ static ssize_t file_tty_write(struct kiocb *iocb, struct iov_iter *from)
 	/* Short term debug to catch buggy drivers */
 	if (tty->ops->write_room == NULL)
 		tty_err(tty, "missing write_room method\n");
-	ld = tty_ldisc_ref_wait(tty);
+	ret = 0;
+	ld = tty_ldisc_ref_io(tty, iocb, &ret);
 	if (!ld)
-		return hung_up_tty_write(iocb, from);
+		return ret ? ret : hung_up_tty_write(iocb, from);
 	if (!ld->ops->write)
 		ret = -EIO;
 	else
