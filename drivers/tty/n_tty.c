@@ -46,6 +46,7 @@
 #include <linux/tty.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#include <linux/uio.h>
 #include <linux/vmalloc.h>
 
 #include "tty.h"
@@ -2102,40 +2103,6 @@ static int job_control(struct tty_struct *tty, struct kiocb *iocb)
 	return __tty_check_change(tty, SIGTTIN);
 }
 
-/*
- * We still hold the atomic_read_lock and the termios_rwsem, and can just
- * continue to copy data.
- */
-static ssize_t n_tty_continue_cookie(struct tty_struct *tty, u8 *kbuf,
-				   size_t nr, void **cookie)
-{
-	struct n_tty_data *ldata = tty->disc_data;
-	u8 *kb = kbuf;
-
-	if (ldata->icanon && !L_EXTPROC(tty)) {
-		/*
-		 * If we have filled the user buffer, see if we should skip an
-		 * EOF character before releasing the lock and returning done.
-		 */
-		if (!nr)
-			canon_skip_eof(ldata);
-		else if (canon_copy_from_read_buf(tty, &kb, &nr))
-			return kb - kbuf;
-	} else {
-		if (copy_from_read_buf(tty, &kb, &nr))
-			return kb - kbuf;
-	}
-
-	/* No more data - release locks and stop retries */
-	n_tty_kick_worker(tty);
-	n_tty_check_unthrottle(tty);
-	up_read(&tty->termios_rwsem);
-	mutex_unlock(&ldata->atomic_read_lock);
-	*cookie = NULL;
-
-	return kb - kbuf;
-}
-
 static int n_tty_wait_for_input(struct tty_struct *tty, struct kiocb *iocb,
 				struct wait_queue_entry *wait, long *timeout)
 {
@@ -2166,11 +2133,8 @@ static int n_tty_wait_for_input(struct tty_struct *tty, struct kiocb *iocb,
 /**
  * n_tty_read		-	read function for tty
  * @tty: tty device
- * @file: file object
- * @kbuf: kernelspace buffer pointer
- * @nr: size of I/O
- * @cookie: if non-%NULL, this is a continuation read
- * @offset: where to continue reading from (unused in n_tty)
+ * @iocb: the read's kiocb
+ * @to: destination
  *
  * Perform reads for the line discipline. We are guaranteed that the line
  * discipline will not be closed under us but we may get multiple parallel
@@ -2179,25 +2143,28 @@ static int n_tty_wait_for_input(struct tty_struct *tty, struct kiocb *iocb,
  *
  * This code must be sure never to sleep through a hangup.
  *
+ * Data is taken out of the read buffer into a small kernel buffer. The copy
+ * to @to can fault, so it's never done with termios_rwsem held, and the last
+ * chunk is copied after dropping atomic_read_lock too.
+ *
  * Locking: n_tty_read()/consumer path:
  *	claims non-exclusive termios_rwsem;
  *	publishes read_tail
  */
-static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb, u8 *kbuf,
-			  size_t nr, void **cookie, unsigned long offset)
+static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb,
+			  struct iov_iter *to)
 {
 	struct n_tty_data *ldata = tty->disc_data;
-	u8 *kb = kbuf;
+	size_t count = iov_iter_count(to);
+	u8 kbuf[64], *kb = kbuf;
+	size_t nr = min(count, sizeof(kbuf));
+	size_t copied = 0;
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	int minimum, time;
 	ssize_t retval;
 	long timeout;
 	bool packet;
 	size_t old_tail;
-
-	/* Is this a continuation of a read started earlier? */
-	if (*cookie)
-		return n_tty_continue_cookie(tty, kbuf, nr, cookie);
 
 	retval = job_control(tty, iocb);
 	if (retval < 0)
@@ -2232,11 +2199,34 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb, u8 *kbuf,
 	old_tail = ldata->read_tail;
 
 	add_wait_queue(&tty->read_wait, &wait);
-	while (nr) {
+	for (;;) {
+		if (!nr) {
+			size_t n = kb - kbuf, c;
+
+			if (copied + n == count)
+				break;
+
+			/*
+			 * The kernel buffer is full but the read isn't, hand
+			 * it over first. atomic_read_lock stays held, so the
+			 * read still returns contiguous data.
+			 */
+			up_read(&tty->termios_rwsem);
+			c = copy_to_iter(kbuf, n, to);
+			down_read(&tty->termios_rwsem);
+			copied += c;
+			kb = kbuf;
+			if (c != n) {
+				retval = -EFAULT;
+				break;
+			}
+			nr = min(count - copied, sizeof(kbuf));
+		}
+
 		/* First test for status change. */
 		if (packet && tty->link->ctrl.pktstatus) {
 			u8 cs;
-			if (kb != kbuf)
+			if (copied || kb != kbuf)
 				break;
 			scoped_guard(spinlock_irq, &tty->link->ctrl.lock) {
 				cs = tty->link->ctrl.pktstatus;
@@ -2263,26 +2253,36 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb, u8 *kbuf,
 		}
 
 		if (ldata->icanon && !L_EXTPROC(tty)) {
-			if (canon_copy_from_read_buf(tty, &kb, &nr))
-				goto more_to_be_read;
+			if (canon_copy_from_read_buf(tty, &kb, &nr)) {
+				/*
+				 * The read filled up mid-line. If the line
+				 * was pushed with EOF, eat it here so the next
+				 * read doesn't return 0.
+				 */
+				if (copied + (kb - kbuf) == count)
+					canon_skip_eof(ldata);
+				continue;
+			}
 		} else {
 			/* Deal with packet mode. */
-			if (packet && kb == kbuf) {
+			if (packet && !copied && kb == kbuf) {
 				*kb++ = TIOCPKT_DATA;
 				nr--;
 			}
 
-			if (copy_from_read_buf(tty, &kb, &nr) && kb - kbuf >= minimum)
-				goto more_to_be_read;
+			if (copy_from_read_buf(tty, &kb, &nr) &&
+			    copied + (kb - kbuf) >= minimum)
+				continue;
 		}
 
 		n_tty_check_unthrottle(tty);
 
-		if (kb - kbuf >= minimum)
+		if (copied + (kb - kbuf) >= minimum)
 			break;
 		if (time)
 			timeout = time;
 	}
+
 	if (old_tail != ldata->read_tail) {
 		/*
 		 * Make sure no_room is not read in n_tty_kick_worker()
@@ -2296,22 +2296,21 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct kiocb *iocb, u8 *kbuf,
 	remove_wait_queue(&tty->read_wait, &wait);
 	mutex_unlock(&ldata->atomic_read_lock);
 
-	if (kb - kbuf)
-		retval = kb - kbuf;
+	if (kb != kbuf) {
+		size_t n = kb - kbuf, c;
+
+		c = copy_to_iter(kbuf, n, to);
+		copied += c;
+		if (c != n)
+			retval = -EFAULT;
+	}
+	/* The kernel buffer may have held a password */
+	memzero_explicit(kbuf, sizeof(kbuf));
+
+	if (copied)
+		retval = copied;
 
 	return retval;
-more_to_be_read:
-	/*
-	 * There is more to be had and we have nothing more to wait for, so
-	 * let's mark us for retries.
-	 *
-	 * NOTE! We return here with both the termios_sem and atomic_read_lock
-	 * still held, the retries will release them when done.
-	 */
-	remove_wait_queue(&tty->read_wait, &wait);
-	*cookie = cookie;
-
-	return kb - kbuf;
 }
 
 /**

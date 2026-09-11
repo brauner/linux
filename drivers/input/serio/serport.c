@@ -150,8 +150,7 @@ static void serport_ldisc_receive(struct tty_struct *tty, const u8 *cp,
  */
 
 static ssize_t serport_ldisc_read(struct tty_struct *tty, struct kiocb *iocb,
-				  u8 *kbuf, size_t nr, void **cookie,
-				  unsigned long offset)
+				  struct iov_iter *to)
 {
 	struct serport *serport = tty->disc_data;
 	struct serio *serio;

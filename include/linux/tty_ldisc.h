@@ -89,12 +89,12 @@ int ldsem_down_write_nested(struct ld_semaphore *sem, int subclass,
  *
  *	Optional.
  *
- * @read: [TTY] ``ssize_t ()(struct tty_struct *tty, struct kiocb *iocb, u8 *buf,
- *		size_t nr, void **cookie, unsigned long offset)``
+ * @read: [TTY] ``ssize_t ()(struct tty_struct *tty, struct kiocb *iocb,
+ *		struct iov_iter *to)``
  *
  *	This function is called when the user requests to read from the @tty.
- *	The line discipline will return whatever characters it has buffered up
- *	for the user. If this function is not defined, the user will receive
+ *	The line discipline copies whatever characters it has buffered up
+ *	into @to. If this function is not defined, the user will receive
  *	an %EIO error. Multiple read calls may occur in parallel and the ldisc
  *	must deal with serialization issues.
  *
@@ -237,8 +237,8 @@ struct tty_ldisc_ops {
 	int	(*open)(struct tty_struct *tty);
 	void	(*close)(struct tty_struct *tty);
 	void	(*flush_buffer)(struct tty_struct *tty);
-	ssize_t	(*read)(struct tty_struct *tty, struct kiocb *iocb, u8 *buf,
-			size_t nr, void **cookie, unsigned long offset);
+	ssize_t	(*read)(struct tty_struct *tty, struct kiocb *iocb,
+			struct iov_iter *to);
 	ssize_t	(*write)(struct tty_struct *tty, struct kiocb *iocb,
 			 const u8 *buf, size_t nr);
 	int	(*ioctl)(struct tty_struct *tty, unsigned int cmd,

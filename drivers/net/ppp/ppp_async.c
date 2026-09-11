@@ -192,8 +192,8 @@ ppp_asynctty_close(struct tty_struct *tty)
  * Pppd reads and writes packets via /dev/ppp instead.
  */
 static ssize_t
-ppp_asynctty_read(struct tty_struct *tty, struct kiocb *iocb, u8 *buf,
-		  size_t count, void **cookie, unsigned long offset)
+ppp_asynctty_read(struct tty_struct *tty, struct kiocb *iocb,
+		  struct iov_iter *to)
 {
 	return -EAGAIN;
 }

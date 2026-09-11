@@ -10,8 +10,8 @@
  *  Copyright (C) Intel 2017
  */
 
-static ssize_t n_null_read(struct tty_struct *tty, struct kiocb *iocb, u8 *buf,
-			   size_t nr, void **cookie, unsigned long offset)
+static ssize_t n_null_read(struct tty_struct *tty, struct kiocb *iocb,
+			   struct iov_iter *to)
 {
 	return -EOPNOTSUPP;
 }

@@ -823,71 +823,6 @@ static void tty_update_time(struct tty_struct *tty, bool mtime)
 	}
 }
 
-/*
- * Iterate on the ldisc ->read() function until we've gotten all
- * the data the ldisc has for us.
- *
- * The "cookie" is something that the ldisc read function can fill
- * in to let us know that there is more data to be had.
- *
- * We promise to continue to call the ldisc until it stops returning
- * data or clears the cookie. The cookie may be something that the
- * ldisc maintains state for and needs to free.
- */
-static ssize_t iterate_tty_read(struct tty_ldisc *ld, struct tty_struct *tty,
-				struct kiocb *iocb, struct iov_iter *to)
-{
-	void *cookie = NULL;
-	unsigned long offset = 0;
-	ssize_t retval = 0;
-	size_t copied, count = iov_iter_count(to);
-	u8 kernel_buf[64];
-
-	do {
-		ssize_t size = min(count, sizeof(kernel_buf));
-
-		size = ld->ops->read(tty, iocb, kernel_buf, size, &cookie, offset);
-		if (!size)
-			break;
-
-		if (size < 0) {
-			/* Did we have an earlier error (ie -EFAULT)? */
-			if (retval)
-				break;
-			retval = size;
-
-			/*
-			 * -EOVERFLOW means we didn't have enough space
-			 * for a whole packet, and we shouldn't return
-			 * a partial result.
-			 */
-			if (retval == -EOVERFLOW)
-				offset = 0;
-			break;
-		}
-
-		copied = copy_to_iter(kernel_buf, size, to);
-		offset += copied;
-		count -= copied;
-
-		/*
-		 * If the user copy failed, we still need to do another ->read()
-		 * call if we had a cookie to let the ldisc clear up.
-		 *
-		 * But make sure size is zeroed.
-		 */
-		if (unlikely(copied != size)) {
-			count = 0;
-			retval = -EFAULT;
-		}
-	} while (cookie);
-
-	/* We always clear tty buffer in case they contained passwords */
-	memzero_explicit(kernel_buf, sizeof(kernel_buf));
-	return offset ? offset : retval;
-}
-
-
 /**
  * tty_read - read method for tty device files
  * @iocb: kernel I/O control block
@@ -921,7 +856,7 @@ static ssize_t tty_read(struct kiocb *iocb, struct iov_iter *to)
 		return hung_up_tty_read(iocb, to);
 	ret = -EIO;
 	if (ld->ops->read)
-		ret = iterate_tty_read(ld, tty, iocb, to);
+		ret = ld->ops->read(tty, iocb, to);
 	tty_ldisc_deref(ld);
 
 	if (ret > 0)

@@ -345,8 +345,7 @@ static int nci_uart_tty_ioctl(struct tty_struct *tty, unsigned int cmd,
 
 /* We don't provide read/write/poll interface for user space. */
 static ssize_t nci_uart_tty_read(struct tty_struct *tty, struct kiocb *iocb,
-				 u8 *buf, size_t nr, void **cookie,
-				 unsigned long offset)
+				 struct iov_iter *to)
 {
 	return 0;
 }

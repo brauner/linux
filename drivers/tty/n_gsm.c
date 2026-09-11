@@ -3746,8 +3746,8 @@ static void gsmld_write_wakeup(struct tty_struct *tty)
  *	This code must be sure never to sleep through a hangup.
  */
 
-static ssize_t gsmld_read(struct tty_struct *tty, struct kiocb *iocb, u8 *buf,
-			  size_t nr, void **cookie, unsigned long offset)
+static ssize_t gsmld_read(struct tty_struct *tty, struct kiocb *iocb,
+			  struct iov_iter *to)
 {
 	return -EOPNOTSUPP;
 }
