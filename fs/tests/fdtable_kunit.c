@@ -22,7 +22,7 @@ static void test_alloc_fdtable(struct kunit *test)
 	 * __counted_by_ptr.
 	 */
 #ifdef CONFIG_CC_HAS_COUNTED_BY_PTR
-	KUNIT_EXPECT_EQ(test, __builtin_dynamic_object_size(fdt->fd, 0),
+	KUNIT_EXPECT_EQ(test, __struct_size(fdt->fd),
 			fdt->max_fds * sizeof(struct file *));
 #endif
 
@@ -51,7 +51,7 @@ static void test_dup_fd(struct kunit *test)
 	 * __counted_by_ptr.
 	 */
 #ifdef CONFIG_CC_HAS_COUNTED_BY_PTR
-	KUNIT_EXPECT_EQ(test, __builtin_dynamic_object_size(fdt->fd, 0),
+	KUNIT_EXPECT_EQ(test, __struct_size(fdt->fd),
 			fdt->max_fds * sizeof(struct file *));
 #endif
 
