@@ -352,6 +352,19 @@ static inline bool fd_is_open(unsigned int fd, const struct fdtable *fdt)
 	return test_bit(fd, fdt->open_fds);
 }
 
+/**
+ * last_fd - return last valid index into fd table
+ * @fdt: File descriptor table.
+ *
+ * Context: Either rcu read lock or files_lock must be held.
+ *
+ * Returns: Last valid index into fdtable.
+ */
+static inline unsigned last_fd(struct fdtable *fdt)
+{
+	return fdt->max_fds - 1;
+}
+
 /*
  * Note that a sane fdtable size always has to be a multiple of
  * BITS_PER_LONG, since we have bitmaps that are sized by this.
@@ -744,19 +757,6 @@ int close_fd(unsigned fd)
 	return filp_close(file, files);
 }
 EXPORT_SYMBOL(close_fd);
-
-/**
- * last_fd - return last valid index into fd table
- * @fdt: File descriptor table.
- *
- * Context: Either rcu read lock or files_lock must be held.
- *
- * Returns: Last valid index into fdtable.
- */
-static inline unsigned last_fd(struct fdtable *fdt)
-{
-	return fdt->max_fds - 1;
-}
 
 static inline void __range_cloexec(struct files_struct *cur_fds,
 				   unsigned int fd, unsigned int max_fd)
