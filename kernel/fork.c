@@ -1679,7 +1679,7 @@ static int copy_files(u64 clone_flags, struct task_struct *tsk,
 		return 0;
 	}
 
-	newf = dup_fd(oldf, NULL);
+	newf = dup_fd(oldf, NULL, 0);
 	if (IS_ERR(newf))
 		return PTR_ERR(newf);
 
@@ -3216,7 +3216,7 @@ static int unshare_fd(unsigned long unshare_flags, struct files_struct **new_fdp
 
 	if ((unshare_flags & CLONE_FILES) &&
 	    (fd && atomic_read(&fd->count) > 1)) {
-		fd = dup_fd(fd, NULL);
+		fd = dup_fd(fd, NULL, 0);
 		if (IS_ERR(fd))
 			return PTR_ERR(fd);
 		*new_fdp = fd;

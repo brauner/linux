@@ -104,7 +104,15 @@ int unshare_files(void);
 struct fd_range {
 	unsigned int from, to;
 };
-struct files_struct *dup_fd(struct files_struct *, struct fd_range *) __latent_entropy;
+
+/*
+ * Leave the close-on-exec descriptors outside of the range behind instead of
+ * dropping the range itself.
+ */
+#define DUP_FD_CLOEXEC_EXCEPT	(1U << 0)
+
+struct files_struct *dup_fd(struct files_struct *, struct fd_range *,
+			    unsigned int) __latent_entropy;
 void do_close_on_exec(struct files_struct *);
 int iterate_fd(struct files_struct *, unsigned,
 		int (*)(const void *, struct file *, unsigned),
