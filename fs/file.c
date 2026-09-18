@@ -377,35 +377,43 @@ static unsigned long fd_range_word(struct fd_range *range, unsigned int i)
 		       max(range->from, first) - first);
 }
 
-/* Bits of word @i that dup_fd() leaves behind. */
-static unsigned long dup_fd_dropped_word(unsigned int i, struct fd_range *range)
+/* Bits of word @i that dup_fd() leaves behind, see DUP_FD_* for @flags. */
+static unsigned long dup_fd_dropped_word(unsigned int i, struct fd_range *range,
+					 unsigned int flags)
 {
+	unsigned long dropped;
+
 	if (!range)
 		return 0;
-	return fd_range_word(range, i);
+	dropped = fd_range_word(range, i);
+	if (flags & DUP_FD_EXCEPT)
+		dropped = ~dropped;
+	return dropped;
 }
 
 /* Is @fd one of the descriptors dup_fd() leaves behind? */
-static bool dup_fd_drops(unsigned int fd, struct fd_range *range)
+static bool dup_fd_drops(unsigned int fd, struct fd_range *range, unsigned int flags)
 {
-	return dup_fd_dropped_word(fd / BITS_PER_LONG, range) & BIT_MASK(fd);
+	return dup_fd_dropped_word(fd / BITS_PER_LONG, range, flags) &
+	       BIT_MASK(fd);
 }
 
 /*
  * Note that a sane fdtable size always has to be a multiple of
  * BITS_PER_LONG, since we have bitmaps that are sized by this.
  *
- * range is optional - when close_range() is asked to unshare
- * and close, dup_fd() leaves the descriptors in that range behind,
- * so the cloned table only has to reach the last open descriptor
- * outside of it.
+ * range is optional. When close_range() is asked to unshare, dup_fd()
+ * leaves descriptors behind as the DUP_FD_* flags say, so the cloned
+ * table only has to reach the last open descriptor that is carried
+ * over.
  */
-static unsigned int sane_fdtable_size(struct fdtable *fdt, struct fd_range *range)
+static unsigned int sane_fdtable_size(struct fdtable *fdt,
+				      struct fd_range *range, unsigned int flags)
 {
 	unsigned int i = fdt_words(fdt);
 
 	while (i--) {
-		unsigned long dropped = dup_fd_dropped_word(i, range);
+		unsigned long dropped = dup_fd_dropped_word(i, range, flags);
 
 		if (fdt->open_fds[i] & ~dropped)
 			return (i + 1) * BITS_PER_LONG;
@@ -416,9 +424,10 @@ static unsigned int sane_fdtable_size(struct fdtable *fdt, struct fd_range *rang
 /*
  * Allocate a new descriptor table and copy contents from the passed in
  * instance.  Returns a pointer to cloned table on success, ERR_PTR()
- * on failure.  For 'range' see sane_fdtable_size().
+ * on failure.  For 'range' and 'flags' see sane_fdtable_size().
  */
-struct files_struct *dup_fd(struct files_struct *oldf, struct fd_range *range)
+struct files_struct *dup_fd(struct files_struct *oldf, struct fd_range *range,
+			    unsigned int flags)
 {
 	struct files_struct *newf;
 	struct file **old_fds, **new_fds;
@@ -444,7 +453,7 @@ struct files_struct *dup_fd(struct files_struct *oldf, struct fd_range *range)
 
 	spin_lock(&oldf->file_lock);
 	old_fdt = files_fdtable(oldf);
-	open_files = sane_fdtable_size(old_fdt, range);
+	open_files = sane_fdtable_size(old_fdt, range, flags);
 
 	/*
 	 * Check whether we need to allocate a larger fd array and fd set.
@@ -468,7 +477,7 @@ struct files_struct *dup_fd(struct files_struct *oldf, struct fd_range *range)
 		 */
 		spin_lock(&oldf->file_lock);
 		old_fdt = files_fdtable(oldf);
-		open_files = sane_fdtable_size(old_fdt, range);
+		open_files = sane_fdtable_size(old_fdt, range, flags);
 	}
 
 	copy_fd_bitmaps(new_fdt, old_fdt, open_files / BITS_PER_LONG);
@@ -494,7 +503,7 @@ struct files_struct *dup_fd(struct files_struct *oldf, struct fd_range *range)
 	for (fd = 0; fd < open_files; fd++) {
 		struct file *f = rcu_dereference_raw(*old_fds++);
 
-		if (f && !dup_fd_drops(fd, range)) {
+		if (f && !dup_fd_drops(fd, range, flags)) {
 			get_file(f);
 		} else {
 			f = NULL;
@@ -866,7 +875,7 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 		if (flags & CLOSE_RANGE_CLOEXEC)
 			drop = NULL;
 
-		fds = dup_fd(cur_fds, drop);
+		fds = dup_fd(cur_fds, drop, 0);
 		if (IS_ERR(fds))
 			return PTR_ERR(fds);
 		/*
