@@ -378,8 +378,8 @@ static unsigned long fd_range_word(struct fd_range *range, unsigned int i)
 }
 
 /* Bits of word @i that dup_fd() leaves behind, see DUP_FD_* for @flags. */
-static unsigned long dup_fd_dropped_word(unsigned int i, struct fd_range *range,
-					 unsigned int flags)
+static unsigned long dup_fd_dropped_word(struct fdtable *fdt, unsigned int i,
+					 struct fd_range *range, unsigned int flags)
 {
 	unsigned long dropped;
 
@@ -388,13 +388,16 @@ static unsigned long dup_fd_dropped_word(unsigned int i, struct fd_range *range,
 	dropped = fd_range_word(range, i);
 	if (flags & DUP_FD_EXCEPT)
 		dropped = ~dropped;
+	if (flags & DUP_FD_CLOEXEC_ONLY)
+		dropped &= fdt->close_on_exec[i];
 	return dropped;
 }
 
 /* Is @fd one of the descriptors dup_fd() leaves behind? */
-static bool dup_fd_drops(unsigned int fd, struct fd_range *range, unsigned int flags)
+static bool dup_fd_drops(unsigned int fd, struct fdtable *fdt,
+			 struct fd_range *range, unsigned int flags)
 {
-	return dup_fd_dropped_word(fd / BITS_PER_LONG, range, flags) &
+	return dup_fd_dropped_word(fdt, fd / BITS_PER_LONG, range, flags) &
 	       BIT_MASK(fd);
 }
 
@@ -413,7 +416,7 @@ static unsigned int sane_fdtable_size(struct fdtable *fdt,
 	unsigned int i = fdt_words(fdt);
 
 	while (i--) {
-		unsigned long dropped = dup_fd_dropped_word(i, range, flags);
+		unsigned long dropped = dup_fd_dropped_word(fdt, i, range, flags);
 
 		if (fdt->open_fds[i] & ~dropped)
 			return (i + 1) * BITS_PER_LONG;
@@ -503,7 +506,7 @@ struct files_struct *dup_fd(struct files_struct *oldf, struct fd_range *range,
 	for (fd = 0; fd < open_files; fd++) {
 		struct file *f = rcu_dereference_raw(*old_fds++);
 
-		if (f && !dup_fd_drops(fd, range, flags)) {
+		if (f && !dup_fd_drops(fd, old_fdt, range, flags)) {
 			get_file(f);
 		} else {
 			f = NULL;

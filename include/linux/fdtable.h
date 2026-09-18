@@ -107,6 +107,8 @@ struct fd_range {
 
 /* Drop the descriptors outside of the range instead of the ones in it. */
 #define DUP_FD_EXCEPT		(1U << 0)
+/* Only drop descriptors that have close-on-exec set. */
+#define DUP_FD_CLOEXEC_ONLY	(1U << 1)
 
 struct files_struct *dup_fd(struct files_struct *, struct fd_range *,
 			    unsigned int) __latent_entropy;
