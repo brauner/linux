@@ -826,8 +826,18 @@ static inline void __range_cloexec(struct files_struct *cur_fds,
 	spin_unlock(&cur_fds->file_lock);
 }
 
+/* Next open descriptor in [fd, max_fd], or the next close-on-exec one. */
+static inline unsigned int next_fd_to_close(struct fdtable *fdt, unsigned int fd,
+					    unsigned int max_fd, bool cloexec)
+{
+	if (cloexec)
+		return find_next_and_bit(fdt->open_fds, fdt->close_on_exec,
+					 max_fd + 1, fd);
+	return find_next_bit(fdt->open_fds, max_fd + 1, fd);
+}
+
 static inline void __range_close(struct files_struct *files, unsigned int fd,
-				 unsigned int max_fd)
+				 unsigned int max_fd, bool cloexec)
 {
 	struct file *file;
 	struct fdtable *fdt;
@@ -838,9 +848,9 @@ static inline void __range_close(struct files_struct *files, unsigned int fd,
 	n = last_fd(fdt);
 	max_fd = min(max_fd, n);
 
-	for (fd = find_next_bit(fdt->open_fds, max_fd + 1, fd);
+	for (fd = next_fd_to_close(fdt, fd, max_fd, cloexec);
 	     fd <= max_fd;
-	     fd = find_next_bit(fdt->open_fds, max_fd + 1, fd + 1)) {
+	     fd = next_fd_to_close(fdt, fd + 1, max_fd, cloexec)) {
 		file = file_close_fd_locked(files, fd);
 		if (file) {
 			spin_unlock(&files->file_lock);
@@ -858,6 +868,16 @@ static inline void __range_close(struct files_struct *files, unsigned int fd,
 	spin_unlock(&files->file_lock);
 }
 
+/* Close every open close-on-exec descriptor outside of [fd, max_fd]. */
+static inline void __range_close_cloexec_except(struct files_struct *files,
+						unsigned int fd, unsigned int max_fd)
+{
+	if (fd > 0)
+		__range_close(files, 0, fd - 1, true);
+	if (max_fd < UINT_MAX)
+		__range_close(files, max_fd + 1, UINT_MAX, true);
+}
+
 /**
  * sys_close_range() - Close all file descriptors in a given range.
  *
@@ -868,6 +888,11 @@ static inline void __range_close(struct files_struct *files, unsigned int fd,
  * This closes a range of file descriptors. All file descriptors
  * from @fd up to and including @max_fd are closed.
  * Currently, errors to close a given file descriptor are ignored.
+ *
+ * With CLOSE_RANGE_CLOEXEC_EXCEPT the range says what to keep instead.
+ * Every open file descriptor with close-on-exec set is closed unless it
+ * falls into [@fd, @max_fd]. To keep nothing, name a range that cannot
+ * hold an open file descriptor, e.g. close_range(~0U, ~0U, ...).
  */
 SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 		unsigned int, flags)
@@ -875,7 +900,15 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 	struct task_struct *me = current;
 	struct files_struct *cur_fds = me->files, *fds = NULL;
 
-	if (flags & ~(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC))
+	if (flags & ~(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC |
+		      CLOSE_RANGE_CLOEXEC_EXCEPT))
+		return -EINVAL;
+
+	/*
+	 * One asks for file descriptors to be marked close-on-exec, the other
+	 * acts on the ones already marked. They aren't the same request.
+	 */
+	if ((flags & CLOSE_RANGE_CLOEXEC) && (flags & CLOSE_RANGE_CLOEXEC_EXCEPT))
 		return -EINVAL;
 
 	if (fd > max_fd)
@@ -883,6 +916,7 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 
 	if ((flags & CLOSE_RANGE_UNSHARE) && atomic_read(&cur_fds->count) > 1) {
 		struct fd_range range = {fd, max_fd}, *punch_hole = &range;
+		unsigned int dup_flags = 0;
 
 		/*
 		 * If the caller requested all fds to be made cloexec we always
@@ -891,8 +925,10 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 		 */
 		if (flags & CLOSE_RANGE_CLOEXEC)
 			punch_hole = NULL;
+		else if (flags & CLOSE_RANGE_CLOEXEC_EXCEPT)
+			dup_flags = DUP_FD_CLOEXEC_EXCEPT;
 
-		fds = dup_fd(cur_fds, punch_hole, 0);
+		fds = dup_fd(cur_fds, punch_hole, dup_flags);
 		if (IS_ERR(fds))
 			return PTR_ERR(fds);
 		/*
@@ -902,10 +938,18 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 		swap(cur_fds, fds);
 	}
 
-	if (flags & CLOSE_RANGE_CLOEXEC)
+	if (flags & CLOSE_RANGE_CLOEXEC) {
 		__range_cloexec(cur_fds, fd, max_fd);
-	else
-		__range_close(cur_fds, fd, max_fd);
+	} else if (flags & CLOSE_RANGE_CLOEXEC_EXCEPT) {
+		/*
+		 * If we unshared above, dup_fd() never carried the
+		 * close-on-exec descriptors over in the first place.
+		 */
+		if (!fds)
+			__range_close_cloexec_except(cur_fds, fd, max_fd);
+	} else {
+		__range_close(cur_fds, fd, max_fd, false);
+	}
 
 	if (fds) {
 		/*
