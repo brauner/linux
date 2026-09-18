@@ -809,6 +809,16 @@ static inline void __range_cloexec(struct files_struct *cur_fds,
 	spin_unlock(&cur_fds->file_lock);
 }
 
+/* Mark everything outside of [fd, max_fd] close-on-exec instead. */
+static inline void __range_cloexec_except(struct files_struct *cur_fds,
+					  unsigned int fd, unsigned int max_fd)
+{
+	if (fd > 0)
+		__range_cloexec(cur_fds, 0, fd - 1);
+	if (max_fd < UINT_MAX)
+		__range_cloexec(cur_fds, max_fd + 1, UINT_MAX);
+}
+
 static inline void __range_close(struct files_struct *files, unsigned int fd,
 				 unsigned int max_fd)
 {
@@ -841,6 +851,16 @@ static inline void __range_close(struct files_struct *files, unsigned int fd,
 	spin_unlock(&files->file_lock);
 }
 
+/* Close every open descriptor outside of [fd, max_fd] instead. */
+static inline void __range_close_except(struct files_struct *files,
+					unsigned int fd, unsigned int max_fd)
+{
+	if (fd > 0)
+		__range_close(files, 0, fd - 1);
+	if (max_fd < UINT_MAX)
+		__range_close(files, max_fd + 1, UINT_MAX);
+}
+
 /**
  * sys_close_range() - Close all file descriptors in a given range.
  *
@@ -851,6 +871,10 @@ static inline void __range_close(struct files_struct *files, unsigned int fd,
  * This closes a range of file descriptors. All file descriptors
  * from @fd up to and including @max_fd are closed.
  * Currently, errors to close a given file descriptor are ignored.
+ *
+ * With CLOSE_RANGE_EXCEPT the range names what to leave alone instead:
+ * every open file descriptor outside of [@fd, @max_fd] is closed, or
+ * marked close-on-exec with CLOSE_RANGE_CLOEXEC.
  */
 SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 		unsigned int, flags)
@@ -858,7 +882,8 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 	struct task_struct *me = current;
 	struct files_struct *cur_fds = me->files, *fds = NULL;
 
-	if (flags & ~(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC))
+	if (flags & ~(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC |
+		      CLOSE_RANGE_EXCEPT))
 		return -EINVAL;
 
 	if (fd > max_fd)
@@ -866,6 +891,7 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 
 	if ((flags & CLOSE_RANGE_UNSHARE) && atomic_read(&cur_fds->count) > 1) {
 		struct fd_range range = {fd, max_fd}, *drop = &range;
+		unsigned int dup_flags = 0;
 
 		/*
 		 * If the caller requested all fds to be made cloexec we always
@@ -874,8 +900,10 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 		 */
 		if (flags & CLOSE_RANGE_CLOEXEC)
 			drop = NULL;
+		if (flags & CLOSE_RANGE_EXCEPT)
+			dup_flags |= DUP_FD_EXCEPT;
 
-		fds = dup_fd(cur_fds, drop, 0);
+		fds = dup_fd(cur_fds, drop, dup_flags);
 		if (IS_ERR(fds))
 			return PTR_ERR(fds);
 		/*
@@ -886,10 +914,16 @@ SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
 	}
 
 	if (flags & CLOSE_RANGE_CLOEXEC) {
-		__range_cloexec(cur_fds, fd, max_fd);
+		if (flags & CLOSE_RANGE_EXCEPT)
+			__range_cloexec_except(cur_fds, fd, max_fd);
+		else
+			__range_cloexec(cur_fds, fd, max_fd);
 	} else if (!fds) {
-		/* If we unshared, dup_fd() left the range behind already. */
-		__range_close(cur_fds, fd, max_fd);
+		/* If we unshared, dup_fd() already left behind what we'd close. */
+		if (flags & CLOSE_RANGE_EXCEPT)
+			__range_close_except(cur_fds, fd, max_fd);
+		else
+			__range_close(cur_fds, fd, max_fd);
 	}
 
 	if (fds) {
