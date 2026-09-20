@@ -50,6 +50,7 @@ TARGETS += filesystems/empty_mntns
 TARGETS += filesystems/fsmount_ns
 TARGETS += filesystems/fscontext_ns
 TARGETS += filesystems/xattr
+TARGETS += filesystems/mntns_unbindable
 TARGETS += firmware
 TARGETS += fpu
 TARGETS += ftrace
