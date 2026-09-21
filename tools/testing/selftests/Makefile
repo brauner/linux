@@ -51,6 +51,7 @@ TARGETS += filesystems/fsmount_ns
 TARGETS += filesystems/fscontext_ns
 TARGETS += filesystems/xattr
 TARGETS += filesystems/mntns_unbindable
+TARGETS += filesystems/umount_propagation
 TARGETS += firmware
 TARGETS += fpu
 TARGETS += ftrace
