@@ -1,3 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
+loop_cycle_test
 unmounted_tree_test
 overmount_reparent_test
