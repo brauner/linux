@@ -30,6 +30,8 @@ static char kernfs_pr_cont_buf[PATH_MAX];	/* protected by pr_cont_lock */
 
 #define rb_to_kn(X) rb_entry((X), struct kernfs_node, rb)
 
+static void kernfs_activate_one(struct kernfs_node *kn);
+
 static bool __kernfs_active(struct kernfs_node *kn)
 {
 	return atomic_read(&kn->active) >= 0;
@@ -861,7 +863,6 @@ int kernfs_add_one(struct kernfs_node *kn)
 	}
 
 	up_write(&root->kernfs_iattr_rwsem);
-	up_write(&root->kernfs_rwsem);
 
 	/*
 	 * Activate the new node unless CREATE_DEACTIVATED is requested.
@@ -869,9 +870,15 @@ int kernfs_add_one(struct kernfs_node *kn)
 	 * activating the node with kernfs_activate().  A node which hasn't
 	 * been activated is not visible to userland and its removal won't
 	 * trigger deactivation.
+	 *
+	 * @kn has no children yet, so kernfs_activate() would walk only @kn.
+	 * Do it here rather than dropping the write lock and taking it again
+	 * for every new node.
 	 */
-	if (!(kernfs_root(kn)->flags & KERNFS_ROOT_CREATE_DEACTIVATED))
-		kernfs_activate(kn);
+	if (!(root->flags & KERNFS_ROOT_CREATE_DEACTIVATED))
+		kernfs_activate_one(kn);
+
+	up_write(&root->kernfs_rwsem);
 	return 0;
 
 out_unlock:
@@ -1812,6 +1819,8 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 		     const char *new_name, const struct ns_common *new_ns)
 {
 	struct kernfs_node *old_parent;
+	const char *dup_name = NULL;
+	const char *put_name = NULL;
 	struct kernfs_root *root;
 	const char *old_name;
 	bool reparent;
@@ -1820,6 +1829,9 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 	/* can't move or rename root */
 	if (!rcu_access_pointer(kn->__parent))
 		return -EINVAL;
+
+	if (new_name)
+		dup_name = kstrdup_const(new_name, GFP_KERNEL);
 
 	root = kernfs_root(kn);
 	down_write(&root->kernfs_rwsem);
@@ -1852,9 +1864,10 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 	/* rename kernfs_node */
 	if (strcmp(old_name, new_name) != 0) {
 		error = -ENOMEM;
-		new_name = kstrdup_const(new_name, GFP_KERNEL);
-		if (!new_name)
+		if (!dup_name)
 			goto out;
+		new_name = dup_name;
+		dup_name = NULL;
 	} else {
 		new_name = NULL;
 	}
@@ -1889,11 +1902,14 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 	kernfs_link_sibling(kn);
 
 	if (new_name && !is_kernel_rodata((unsigned long)old_name))
-		kfree_rcu_mightsleep(old_name);
+		put_name = old_name;
 
 	error = 0;
  out:
 	up_write(&root->kernfs_rwsem);
+	kfree_const(dup_name);
+	if (put_name)
+		kfree_rcu_mightsleep(put_name);
 	return error;
 }
 
