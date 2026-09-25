@@ -26,6 +26,7 @@
 #include "xfs_zones.h"
 #include "xfs_trace.h"
 #include "xfs_mru_cache.h"
+#include <linux/bio-integrity.h>
 
 static void
 xfs_open_zone_free_rcu(
@@ -793,17 +794,35 @@ xfs_get_cached_zone(
 
 	rcu_read_lock();
 	oz = VFS_I(ip)->i_private;
-	if (oz) {
-		/*
-		 * GC only steals open zones at mount time, so no GC zones
-		 * should end up in the cache.
-		 */
-		ASSERT(!oz->oz_is_gc);
-		if (!atomic_inc_not_zero(&oz->oz_ref))
-			oz = NULL;
-	}
-	rcu_read_unlock();
+	if (!oz)
+		goto out_unlock;
 
+	/*
+	 * GC only steals open zones at mount time, so no GC zones should end up
+	 * in the cache.
+	 */
+	ASSERT(!oz->oz_is_gc);
+
+	/*
+	 * Drop the old cached open zone if it is full.
+	 */
+	if (oz->oz_allocated == rtg_blocks(oz->oz_rtg)) {
+		spin_lock(&ip->i_flags_lock);
+		oz = VFS_I(ip)->i_private;
+		if (oz && oz->oz_allocated == rtg_blocks(oz->oz_rtg)) {
+			VFS_I(ip)->i_private = NULL;
+			spin_unlock(&ip->i_flags_lock);
+			xfs_open_zone_put(oz);
+			oz = NULL;
+			goto out_unlock;
+		}
+		spin_unlock(&ip->i_flags_lock);
+	}
+
+	if (!atomic_inc_not_zero(&oz->oz_ref))
+		oz = NULL;
+out_unlock:
+	rcu_read_unlock();
 	return oz;
 }
 
@@ -818,18 +837,41 @@ xfs_get_cached_zone(
  * that were every written to, but significantly simplifies the cached zone
  * lookup.  Because the open_zone is clearly marked as full when all data
  * in the underlying RTG was written, the caching is always safe.
+ *
+ * Called with a reference on @oz held.  And returns two references on the
+ * returned zone: one for the caller and one for pinning the zone in
+ * inode->i_private.
  */
-static void
+static struct xfs_open_zone *
 xfs_set_cached_zone(
 	struct xfs_inode	*ip,
 	struct xfs_open_zone	*oz)
 {
 	struct xfs_open_zone	*old_oz;
 
+	/*
+	 * If the open zone cached in the inode still has free space, use that
+	 * instead of the new open zone just selected.  This can happen when
+	 * multiple threads race to perform zone selection for an inode.
+	 * io_uring worker threads seem to be good way to trigger this.
+	 *
+	 * We need to grab an extra reference to this open zone as the caller
+	 * owns a reference in addition to the i_private pointer.
+	 */
+	spin_lock(&ip->i_flags_lock);
+	old_oz = VFS_I(ip)->i_private;
+	if (old_oz && old_oz->oz_allocated < rtg_blocks(old_oz->oz_rtg) &&
+	    atomic_inc_not_zero(&old_oz->oz_ref)) {
+		spin_unlock(&ip->i_flags_lock);
+		xfs_open_zone_put(oz);
+		return old_oz;
+	}
+	VFS_I(ip)->i_private = oz;
 	atomic_inc(&oz->oz_ref);
-	old_oz = xchg(&VFS_I(ip)->i_private, oz);
+	spin_unlock(&ip->i_flags_lock);
 	if (old_oz)
 		xfs_open_zone_put(old_oz);
+	return oz;
 }
 
 static void
@@ -868,19 +910,21 @@ xfs_zone_alloc_and_submit(
 	if (xfs_is_shutdown(mp))
 		goto out_error;
 
+	if (ioend->io_flags & IOMAP_IOEND_INTEGRITY)
+		fs_bio_integrity_generate(&ioend->io_bio);
+
 	/*
 	 * If we don't have a locally cached zone in this write context, see if
 	 * the inode is still associated with a zone and use that if so.
 	 */
 	if (!*oz)
-		*oz = xfs_get_cached_zone(ip);
-
-	if (!*oz) {
 select_zone:
+		*oz = xfs_get_cached_zone(ip);
+	if (!*oz) {
 		*oz = xfs_select_zone(mp, write_hint, pack_tight);
 		if (!*oz)
 			goto out_error;
-		xfs_set_cached_zone(ip, *oz);
+		*oz = xfs_set_cached_zone(ip, *oz);
 	}
 
 	alloc_len = xfs_zone_alloc_blocks(*oz, XFS_B_TO_FSB(mp, ioend->io_size),

@@ -445,7 +445,7 @@ xfs_shutdown_devices(
 		blkdev_issue_flush(mp->m_logdev_targp->bt_bdev);
 		invalidate_bdev(mp->m_logdev_targp->bt_bdev);
 	}
-	if (mp->m_rtdev_targp) {
+	if (mp->m_rtdev_targp && mp->m_rtdev_targp != mp->m_ddev_targp) {
 		blkdev_issue_flush(mp->m_rtdev_targp->bt_bdev);
 		invalidate_bdev(mp->m_rtdev_targp->bt_bdev);
 	}
@@ -2317,6 +2317,7 @@ xfs_init_fs_context(
 	mp->m_logbufs = -1;
 	mp->m_logbsize = -1;
 	mp->m_allocsize_log = 16; /* 64k */
+	mp->m_read_bounce = XFS_READ_BOUNCE_LAZY;
 
 	xfs_hooks_init(&mp->m_dir_update_hooks);
 
