@@ -2958,6 +2958,9 @@ static int do_change_type(const struct path *path, int ms_flags)
  *         caller's mount namespace ensures that the caller has the
  *         ability to copy the mount tree.
  *
+ * A mount that has been unmounted and is only kept alive by a reference
+ * can't be copied, not even under (2) or (3).
+ *
  * Returns true if the mount tree can be copied, false otherwise.
  */
 static inline bool may_copy_tree(const struct path *path)
@@ -2967,6 +2970,10 @@ static inline bool may_copy_tree(const struct path *path)
 
 	if (check_mnt(mnt))
 		return true;
+
+	/* An unmounted tree may change under mount_lock alone. */
+	if (!mnt->mnt_ns)
+		return false;
 
 	d_op = path->dentry->d_op;
 	if (d_op == &ns_dentry_operations)
