@@ -140,7 +140,7 @@ xfs_buf_free(
 	ASSERT(list_empty(&bp->b_lru));
 
 	if (!xfs_buftarg_is_mem(bp->b_target) && size >= PAGE_SIZE)
-		mm_account_reclaimed_pages(howmany(size, PAGE_SHIFT));
+		mm_account_reclaimed_pages(howmany(size, PAGE_SIZE));
 
 	if (is_vmalloc_addr(bp->b_addr))
 		vfree(bp->b_addr);
@@ -177,7 +177,7 @@ xfs_buf_alloc_kmem(
 	ASSERT(is_power_of_2(size));
 	ASSERT(size < PAGE_SIZE);
 
-	bp->b_addr = kmalloc(size, gfp_mask);
+	bp->b_addr = kmalloc(size, gfp_mask | __GFP_RECLAIMABLE);
 	if (!bp->b_addr)
 		return -ENOMEM;
 
