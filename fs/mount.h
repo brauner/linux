@@ -51,8 +51,17 @@ struct mount {
 	struct vfsmount mnt;
 	union {
 		struct rb_node mnt_node; /* node in the ns->mounts rbtree */
-		struct rcu_head mnt_rcu;
-		struct llist_node mnt_llist;
+		struct {		 /* once it has left its namespace */
+			union {
+				struct rcu_head mnt_rcu;
+				struct llist_node mnt_llist;
+			};
+			struct {
+				/* what a vacant mount stands in for, NULL once released */
+				struct dentry *mnt_root_displaced;
+				int mnt_vacant_seen; /* a walk took a reference to the stand-in */
+			};
+		};
 	};
 #ifdef CONFIG_SMP
 	struct mnt_pcp __percpu *mnt_pcp;
@@ -85,7 +94,7 @@ struct mount {
 	struct mountpoint *mnt_mp;	/* where is it mounted */
 	union {
 		struct hlist_node mnt_mp_list;	/* list mounts with the same mountpoint */
-		struct hlist_node mnt_umount;
+		struct hlist_node mnt_umount;	/* in the parent's mnt_stuck_children */
 	};
 #ifdef CONFIG_FSNOTIFY
 	struct fsnotify_mark_connector __rcu *mnt_fsnotify_marks;

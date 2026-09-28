@@ -75,11 +75,12 @@ static DEFINE_IDA(mnt_group_ida);
 
 /* Don't allow confusion with old 32bit mount ID */
 #define MNT_UNIQUE_ID_OFFSET (1ULL << 31)
-static u64 mnt_id_ctr = MNT_UNIQUE_ID_OFFSET;
+static atomic64_t mnt_id_ctr = ATOMIC64_INIT(MNT_UNIQUE_ID_OFFSET);
 
 static struct hlist_head *mount_hashtable __ro_after_init;
 static struct hlist_head *mountpoint_hashtable __ro_after_init;
 static struct kmem_cache *mnt_cache __ro_after_init;
+static struct vfsmount *knullfs __ro_after_init; /* private nullfs instance */
 static DECLARE_RWSEM(namespace_sem);
 static LIST_HEAD(unmounted);	/* protected by namespace_sem */
 static LIST_HEAD(ex_mountpoints); /* protected by namespace_sem */
@@ -217,7 +218,7 @@ static int mnt_alloc_id(struct mount *mnt)
 	xa_lock(&mnt_id_xa);
 	res = __xa_alloc(&mnt_id_xa, &mnt->mnt_id, mnt, xa_limit_31b, GFP_KERNEL);
 	if (!res)
-		mnt->mnt_id_unique = ++mnt_id_ctr;
+		mnt->mnt_id_unique = atomic64_inc_return(&mnt_id_ctr);
 	xa_unlock(&mnt_id_xa);
 	return res;
 }
@@ -748,6 +749,18 @@ static void delayed_free_vfsmnt(struct rcu_head *head)
 	free_vfsmnt(container_of(head, struct mount, mnt_rcu));
 }
 
+/* Set by vacate_mount(), never cleared and never inherited by a clone. */
+static __always_inline bool is_vacant_mount(const struct mount *mnt)
+{
+	return READ_ONCE(mnt->mnt.mnt_flags) & MNT_VACANT;
+}
+
+static __always_inline void trace_vacant_mount(struct mount *mnt)
+{
+	if (unlikely(is_vacant_mount(mnt)))
+		WRITE_ONCE(mnt->mnt_vacant_seen, 1);
+}
+
 /* call under rcu_read_lock */
 int __legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 {
@@ -757,6 +770,8 @@ int __legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 	if (bastard == NULL)
 		return 0;
 	mnt = real_mount(bastard);
+	/* A stand-in is freed with its parent unless a walk got hold of it. */
+	trace_vacant_mount(mnt);
 	mnt_inc_count(mnt);
 	smp_mb();	/* see mntput_no_expire_slowpath() and do_umount() */
 	if (likely(!read_seqretry(&mount_lock, seq)))
@@ -767,6 +782,8 @@ int __legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 		unlock_mount_hash();
 		return 1;
 	}
+	/* It may have been vacated after the check above. */
+	trace_vacant_mount(mnt);
 	unlock_mount_hash();
 	/* caller will mntput() */
 	return -1;
@@ -1309,8 +1326,49 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	return ERR_PTR(err);
 }
 
+/* What it stood in for is gone already and it holds nothing on knullfs. */
+static void free_vacant_mount(struct mount *mnt)
+{
+	if (!mnt)
+		return;
+
+	VFS_WARN_ON_ONCE(mnt->mnt_pins.first);
+	VFS_WARN_ON_ONCE(!hlist_empty(&mnt->mnt_stuck_children));
+#ifdef CONFIG_FSNOTIFY
+	VFS_WARN_ON_ONCE(rcu_access_pointer(mnt->mnt_fsnotify_marks));
+#endif
+	mnt_free_id(mnt);
+	call_rcu(&mnt->mnt_rcu, delayed_free_vfsmnt);
+}
+
+/* The release is done. Whoever comes second, this or the last put, frees it. */
+static inline void vacant_mount_released(struct mount *mnt)
+{
+	scoped_guard(mount_locked_reader) {
+		mnt->mnt_root_displaced = NULL;
+		if (!(mnt->mnt.mnt_flags & MNT_DOOMED))
+			mnt = NULL;
+	}
+	free_vacant_mount(mnt);
+}
+
+/* The last put is done. Whoever comes second, this or the release, frees it. */
+static inline struct mount *vacant_mount_put(struct mount *mnt)
+{
+	/* Still hashed: it stays until the parent lets go of it. */
+	if (mnt_has_parent(mnt))
+		return NULL;
+	mnt->mnt.mnt_flags |= MNT_DOOMED;
+	if (mnt->mnt_root_displaced)
+		return NULL;
+	return mnt;
+}
+
 static void cleanup_mnt(struct mount *mnt)
 {
+	bool release = is_vacant_mount(mnt);
+	struct dentry *root = release ? mnt->mnt_root_displaced : mnt->mnt.mnt_root;
+	struct super_block *sb = root->d_sb;
 	struct hlist_node *p;
 	struct mount *m;
 	/*
@@ -1318,20 +1376,63 @@ static void cleanup_mnt(struct mount *mnt)
 	 * up a mnt_want/drop_write() pair.  If this happens, the
 	 * filesystem was probably unable to make r/w->r/o transitions.
 	 * The locking used to deal with mnt_count decrement provides barriers,
-	 * so mnt_get_writers() below is safe.
+	 * so mnt_get_writers() below is safe. A vacant mount is still reachable
+	 * and a failing mnt_want_write() on it bumps the count for a moment.
 	 */
-	WARN_ON(mnt_get_writers(mnt));
+	WARN_ON(!release && mnt_get_writers(mnt));
 	if (unlikely(mnt->mnt_pins.first))
 		mnt_pin_kill(mnt);
 	hlist_for_each_entry_safe(m, p, &mnt->mnt_stuck_children, mnt_umount) {
 		hlist_del(&m->mnt_umount);
-		mntput(&m->mnt);
+		free_vacant_mount(m);
 	}
 	fsnotify_vfsmount_delete(&mnt->mnt);
-	dput(mnt->mnt.mnt_root);
-	deactivate_super(mnt->mnt.mnt_sb);
-	mnt_free_id(mnt);
-	call_rcu(&mnt->mnt_rcu, delayed_free_vfsmnt);
+	dput(root);
+	deactivate_super(sb);
+
+	if (unlikely(release)) {
+		vacant_mount_released(mnt);
+	} else {
+		mnt_free_id(mnt);
+		call_rcu(&mnt->mnt_rcu, delayed_free_vfsmnt);
+	}
+}
+
+/*
+ * @mnt lost its last reference while still attached. Don't reveal what's
+ * beneath so mount knullfs over it.
+ */
+static void vacate_mount(struct mount *mnt)
+{
+	mnt->mnt_root_displaced = mnt->mnt.mnt_root;
+	/* knullfs never goes away, a vacant mount holds nothing on it */
+	mnt->mnt.mnt_sb = knullfs->mnt_sb;
+	mnt->mnt.mnt_root = knullfs->mnt_root;
+	mnt_add_instance(mnt, knullfs->mnt_sb);
+	mnt->mnt.mnt_flags |= MNT_READONLY | MNT_VACANT;
+	/* It's a new mount so give it its own mount id. */
+	mnt->mnt_id_unique = atomic64_inc_return(&mnt_id_ctr);
+	/* No reference of its own: the parent frees it unless a walk gets hold of it. */
+	mnt->mnt_vacant_seen = 0;
+}
+
+/*
+ * See whether we can drop a vacant mount. If it hasn't been seen by
+ * __legitimize_mnt() we can elide the costly per-cpu sum. If there's no
+ * reference either __legitimize_mnt() drops it or the release does of
+ * the parent does.
+ */
+static bool may_drop_vacant_mount(struct mount *mnt)
+{
+	if (!is_vacant_mount(mnt))
+		return false;
+	mnt_del_instance(mnt);
+	/* pairs with the barrier after the mark and the count in __legitimize_mnt() */
+	smp_mb();
+	if (READ_ONCE(mnt->mnt_vacant_seen) && mnt_get_count(mnt))
+		return false;
+	mnt->mnt.mnt_flags |= MNT_DOOMED;
+	return !mnt->mnt_root_displaced;
 }
 
 static void __cleanup_mnt(struct rcu_head *head)
@@ -1353,6 +1454,7 @@ static DECLARE_DELAYED_WORK(delayed_mntput_work, delayed_mntput);
 static void noinline mntput_no_expire_slowpath(struct mount *mnt, bool sync)
 {
 	LIST_HEAD(list);
+	bool connected = false;
 	int count;
 
 	VFS_BUG_ON(mnt->mnt_ns);
@@ -1375,7 +1477,22 @@ static void noinline mntput_no_expire_slowpath(struct mount *mnt, bool sync)
 		unlock_mount_hash();
 		return;
 	}
-	mnt->mnt.mnt_flags |= MNT_DOOMED;
+	/* The last put of a vacant mount. */
+	if (unlikely(is_vacant_mount(mnt))) {
+		mnt = vacant_mount_put(mnt);
+		rcu_read_unlock();
+		unlock_mount_hash();
+		free_vacant_mount(mnt);
+		return;
+	}
+	/*
+	 * This was unmounted while being connected to a parent. Don't reveal
+	 * what's underneath so vacate it.
+	 */
+	if (unlikely(mnt_has_parent(mnt)))
+		connected = true;
+	else
+		mnt->mnt.mnt_flags |= MNT_DOOMED;
 	rcu_read_unlock();
 
 	mnt_del_instance(mnt);
@@ -1386,9 +1503,13 @@ static void noinline mntput_no_expire_slowpath(struct mount *mnt, bool sync)
 		struct mount *p, *tmp;
 		list_for_each_entry_safe(p, tmp, &mnt->mnt_mounts,  mnt_child) {
 			__umount_mnt(p, &list);
-			hlist_add_head(&p->mnt_umount, &mnt->mnt_stuck_children);
+			/* a dead stand-in goes with this cleanup, a held one with its holder */
+			if (may_drop_vacant_mount(p))
+				hlist_add_head(&p->mnt_umount, &mnt->mnt_stuck_children);
 		}
 	}
+	if (unlikely(connected))
+		vacate_mount(mnt);
 	unlock_mount_hash();
 	shrink_dentry_list(&list);
 
@@ -1804,6 +1925,19 @@ enum umount_tree_flags {
 	UMOUNT_CONNECTED = 4,
 };
 
+/*
+ * An unmounted mount that stays attached to its unmounted parent:
+ *
+ *  - is hashed and on the parent's list of children, so a walk on the
+ *    parent finds it and never ends up in what it covered
+ *  - is unreachable from any namespace root
+ *  - holds its own reference, dropped by namespace_unlock(); the parent's
+ *    final mntput() unhashes it without putting it, so a child whose
+ *    superblock pins an ancestor can still shut down
+ *  - is vacated if it loses its last reference while attached
+ *    it releases the filesystem it carried and a knullfs mount is placed on
+ *    the parent which is owned by it
+ */
 static bool disconnect_mount(struct mount *mnt, enum umount_tree_flags how)
 {
 	/* Leaving mounts connected is only valid for lazy umounts */
@@ -1814,10 +1948,7 @@ static bool disconnect_mount(struct mount *mnt, enum umount_tree_flags how)
 	if (!mnt_has_parent(mnt))
 		return true;
 
-	/* Because the reference counting rules change when mounts are
-	 * unmounted and connected, umounted mounts may not be
-	 * connected to mounted mounts.
-	 */
+	/* An unmounted mount may only stay attached to an unmounted parent */
 	if (!(mnt->mnt_parent->mnt.mnt_flags & MNT_UMOUNT))
 		return true;
 
@@ -1880,8 +2011,8 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 		/* else it stays on its parent's list of children */
 		if (disconnect && mnt_has_parent(p))
 			umount_mnt(p);
-		if (disconnect)
-			list_add_tail(&p->mnt_list, &unmounted);
+		/* attached or not, it holds its own reference */
+		list_add_tail(&p->mnt_list, &unmounted);
 
 		/*
 		 * At this point p->mnt_ns is NULL, notification will be queued
@@ -2050,9 +2181,12 @@ void __detach_mounts(struct dentry *dentry)
 		mnt = hlist_entry(mp.node.next, struct mount, mnt_mp_list);
 		if (mnt->mnt.mnt_flags & MNT_UMOUNT) {
 			umount_mnt(mnt);
-			list_add_tail(&mnt->mnt_list, &unmounted);
+			/* a dead stand-in left its namespace long ago, no grace period is due */
+			if (may_drop_vacant_mount(mnt))
+				free_vacant_mount(mnt);
+		} else {
+			umount_tree(mnt, UMOUNT_CONNECTED);
 		}
-		else umount_tree(mnt, UMOUNT_CONNECTED);
 	}
 	unpin_mountpoint(&mp);
 }
@@ -6288,10 +6422,12 @@ static void __init init_mount_tree(void)
 	 *
 	 * (1) nullfs with mount id 1
 	 * (2) mutable rootfs with mount id 2
-	 * (3) private nullfs for kthreads (SB_KERNMOUNT)
+	 * (3) private nullfs for kthreads (SB_KERNMOUNT), kept in knullfs
 	 *
 	 * with (2) mounted on top of (1). The init_task's root and pwd
 	 * are pointed at (3) so all kthreads start isolated in nullfs.
+	 * A mount that dies while still attached to its parent is pointed
+	 * at (3) as well, see vacate_mount().
 	 */
 	nullfs_mnt = vfs_kern_mount(&nullfs_fs_type, 0, "nullfs", NULL);
 	if (IS_ERR(nullfs_mnt))
@@ -6323,11 +6459,11 @@ static void __init init_mount_tree(void)
 		init_mnt_ns.nr_mounts++;
 	}
 
-	nullfs_mnt = kern_mount(&nullfs_fs_type);
-	if (IS_ERR(nullfs_mnt))
+	knullfs = kern_mount(&nullfs_fs_type);
+	if (IS_ERR(knullfs))
 		panic("VFS: Failed to create private nullfs instance");
-	root.mnt	= nullfs_mnt;
-	root.dentry	= nullfs_mnt->mnt_root;
+	root.mnt	= knullfs;
+	root.dentry	= knullfs->mnt_root;
 
 	init_task.nsproxy->mnt_ns = &init_mnt_ns;
 	get_mnt_ns(&init_mnt_ns);
