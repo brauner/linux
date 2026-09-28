@@ -32,6 +32,7 @@ algorithms work.
    mmap_prepare
    multigrain-ts
    mount_api
+   mount-references
    quota
    seq_file
    sharedsubtree
