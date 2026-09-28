@@ -211,4 +211,58 @@ TEST_F(vacant_mount, goes_with_parent)
 	pinned_release(_metadata, &p);
 }
 
+/* The same without anyone ever having looked at the vacant mount. */
+TEST_F(vacant_mount, unseen_goes_with_parent)
+{
+	struct pinned p;
+
+	pinned_setup(_metadata, "pinned", &p);
+	vacate_covered(_metadata, "pinned");
+	pinned_release(_metadata, &p);
+}
+
+/*
+ * A walk that reaches the vacant mount takes a reference to it, kept here
+ * by a directory fd on it. The parent lets go of it while that fd is open:
+ * the stand-in stays a nullfs directory until the fd goes.
+ */
+TEST_F(vacant_mount, held_outlives_parent)
+{
+	struct pinned p;
+	struct statfs sf;
+	int cfd;
+
+	pinned_setup(_metadata, "pinned", &p);
+	vacate_covered(_metadata, "pinned");
+	cfd = openat(p.dfd, "covered", O_PATH | O_DIRECTORY);
+	ASSERT_GE(cfd, 0);
+	pinned_release(_metadata, &p);
+
+	ASSERT_EQ(fstatfs(cfd, &sf), 0);
+	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
+	EXPECT_EQ(faccessat(cfd, ".", F_OK, 0), 0);
+	close(cfd);
+}
+
+/* The same with the mountpoint removed below the parent instead. */
+TEST_F(vacant_mount, held_mountpoint_removed)
+{
+	struct pinned p;
+	struct statfs sf;
+	int cfd;
+
+	pinned_setup(_metadata, "pinned", &p);
+	vacate_covered(_metadata, "pinned");
+	cfd = openat(p.dfd, "covered", O_PATH | O_DIRECTORY);
+	ASSERT_GE(cfd, 0);
+	ASSERT_EQ(unlinkat(p.dfd, "covered", AT_REMOVEDIR), 0);
+	EXPECT_EQ(faccessat(p.dfd, "covered", F_OK, 0), -1);
+	EXPECT_EQ(errno, ENOENT);
+
+	ASSERT_EQ(fstatfs(cfd, &sf), 0);
+	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
+	close(cfd);
+	pinned_release(_metadata, &p);
+}
+
 TEST_HARNESS_MAIN
