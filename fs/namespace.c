@@ -81,7 +81,7 @@ static struct hlist_head *mount_hashtable __ro_after_init;
 static struct hlist_head *mountpoint_hashtable __ro_after_init;
 static struct kmem_cache *mnt_cache __ro_after_init;
 static DECLARE_RWSEM(namespace_sem);
-static HLIST_HEAD(unmounted);	/* protected by namespace_sem */
+static LIST_HEAD(unmounted);	/* protected by namespace_sem */
 static LIST_HEAD(ex_mountpoints); /* protected by namespace_sem */
 static struct mnt_namespace *emptied_ns; /* protected by namespace_sem */
 
@@ -1350,7 +1350,7 @@ static void delayed_mntput(struct work_struct *unused)
 }
 static DECLARE_DELAYED_WORK(delayed_mntput_work, delayed_mntput);
 
-static void noinline mntput_no_expire_slowpath(struct mount *mnt)
+static void noinline mntput_no_expire_slowpath(struct mount *mnt, bool sync)
 {
 	LIST_HEAD(list);
 	int count;
@@ -1392,7 +1392,8 @@ static void noinline mntput_no_expire_slowpath(struct mount *mnt)
 	unlock_mount_hash();
 	shrink_dentry_list(&list);
 
-	if (likely(!(mnt->mnt.mnt_flags & MNT_INTERNAL))) {
+	/* From task work already, or a kernel mount: cleanup_mnt() right here. */
+	if (!sync && likely(!(mnt->mnt.mnt_flags & MNT_INTERNAL))) {
 		struct task_struct *task = current;
 		if (likely(!(task->flags & PF_KTHREAD))) {
 			init_task_work(&mnt->mnt_rcu, __cleanup_mnt);
@@ -1404,6 +1405,59 @@ static void noinline mntput_no_expire_slowpath(struct mount *mnt)
 		return;
 	}
 	cleanup_mnt(mnt);
+}
+
+/* Drop the references collected on @head. */
+static void mntput_list(struct list_head *head)
+{
+	struct mount *m, *n;
+
+	list_for_each_entry_safe(m, n, head, mnt_list) {
+		list_del_init(&m->mnt_list);
+		mntput(&m->mnt);
+	}
+}
+
+static void mntput_unmounted_work(struct callback_head *cb)
+{
+	struct mount *first = container_of(cb, struct mount, mnt_rcu);
+	struct mount *m, *n;
+	LIST_HEAD(head);
+
+	/* the ring came without its head, see mntput_unmounted() */
+	list_add_tail(&head, &first->mnt_list);
+	list_for_each_entry_safe(m, n, &head, mnt_list) {
+		list_del_init(&m->mnt_list);
+		if (unlikely(m->mnt_expiry_mark))
+			WRITE_ONCE(m->mnt_expiry_mark, 0);
+		rcu_read_lock();
+		mntput_no_expire_slowpath(m, true);
+		cond_resched();
+	}
+}
+
+/*
+ * Drop the own references of the mounts umount_tree() collected from task
+ * work, in tree order, each final put followed by the cleanup of that
+ * mount: short mount_lock sections spread over the teardown instead of one
+ * burst right after the grace period. The first mount carries the work:
+ * umount_tree() is the only feeder of the list, so it is freshly unmounted
+ * and its mnt_rcu is free until its own final put. A kernel thread or an
+ * exiting task has no task work to come back to and puts them here.
+ */
+static void mntput_unmounted(struct list_head *head)
+{
+	struct mount *first = list_first_entry(head, struct mount, mnt_list);
+
+	if (likely(!(current->flags & PF_KTHREAD))) {
+		list_del(head);
+		init_task_work(&first->mnt_rcu, mntput_unmounted_work);
+		if (!task_work_add(current, &first->mnt_rcu, TWA_RESUME))
+			return;
+		list_add_tail(head, &first->mnt_list);
+	}
+	/* In tree order, so a subtree nobody holds goes without vacant mounts. */
+	mntput_list(head);
 }
 
 static void mntput_no_expire(struct mount *mnt)
@@ -1424,7 +1478,7 @@ static void mntput_no_expire(struct mount *mnt)
 		rcu_read_unlock();
 		return;
 	}
-	mntput_no_expire_slowpath(mnt);
+	mntput_no_expire_slowpath(mnt, false);
 }
 
 void mntput(struct vfsmount *mnt)
@@ -1704,13 +1758,11 @@ static bool need_notify_mnt_list(void)
 static void free_mnt_ns(struct mnt_namespace *);
 static void namespace_unlock(void)
 {
-	struct hlist_head head;
-	struct hlist_node *p;
-	struct mount *m;
 	struct mnt_namespace *ns = emptied_ns;
+	LIST_HEAD(head);
 	LIST_HEAD(list);
 
-	hlist_move_list(&unmounted, &head);
+	list_splice_init(&unmounted, &head);
 	list_splice_init(&ex_mountpoints, &list);
 	emptied_ns = NULL;
 
@@ -1734,15 +1786,11 @@ static void namespace_unlock(void)
 
 	shrink_dentry_list(&list);
 
-	if (likely(hlist_empty(&head)))
+	if (likely(list_empty(&head)))
 		return;
 
 	synchronize_rcu_expedited();
-
-	hlist_for_each_entry_safe(m, p, &head, mnt_umount) {
-		hlist_del(&m->mnt_umount);
-		mntput(&m->mnt);
-	}
+	mntput_unmounted(&head);
 }
 
 static inline void namespace_lock(void)
@@ -1833,7 +1881,7 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 		if (disconnect && mnt_has_parent(p))
 			umount_mnt(p);
 		if (disconnect)
-			hlist_add_head(&p->mnt_umount, &unmounted);
+			list_add_tail(&p->mnt_list, &unmounted);
 
 		/*
 		 * At this point p->mnt_ns is NULL, notification will be queued
@@ -2002,7 +2050,7 @@ void __detach_mounts(struct dentry *dentry)
 		mnt = hlist_entry(mp.node.next, struct mount, mnt_mp_list);
 		if (mnt->mnt.mnt_flags & MNT_UMOUNT) {
 			umount_mnt(mnt);
-			hlist_add_head(&mnt->mnt_umount, &unmounted);
+			list_add_tail(&mnt->mnt_list, &unmounted);
 		}
 		else umount_tree(mnt, UMOUNT_CONNECTED);
 	}
