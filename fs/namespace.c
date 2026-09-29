@@ -1120,7 +1120,7 @@ static void mnt_add_to_ns(struct mnt_namespace *ns, struct mount *mnt)
 	mnt_notify_add(mnt);
 }
 
-static struct mount *next_mnt(struct mount *p, struct mount *root)
+struct mount *next_mnt(struct mount *p, struct mount *root)
 {
 	struct list_head *next = p->mnt_mounts.next;
 	if (next == &p->mnt_mounts) {
@@ -1807,12 +1807,7 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 		list_add_tail(&p->mnt_list, &tmp_list);
 	}
 
-	/* Hide the mounts from mnt_mounts */
-	list_for_each_entry(p, &tmp_list, mnt_list) {
-		list_del_init(&p->mnt_child);
-	}
-
-	/* Add propagated mounts to the tmp_list */
+	/* Add propagated mounts to the tmp_list, root by root */
 	if (how & UMOUNT_PROPAGATE)
 		propagate_umount(&tmp_list);
 
@@ -1834,14 +1829,9 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 			p->mnt.mnt_flags |= MNT_SYNC_UMOUNT;
 
 		disconnect = disconnect_mount(p, how);
-		if (mnt_has_parent(p)) {
-			if (!disconnect) {
-				/* Don't forget about p */
-				list_add_tail(&p->mnt_child, &p->mnt_parent->mnt_mounts);
-			} else {
-				umount_mnt(p);
-			}
-		}
+		/* else it stays on its parent's list of children */
+		if (disconnect && mnt_has_parent(p))
+			umount_mnt(p);
 		if (disconnect)
 			hlist_add_head(&p->mnt_umount, &unmounted);
 

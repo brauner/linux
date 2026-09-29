@@ -558,7 +558,6 @@ static inline bool is_candidate(struct mount *m)
 static void umount_one(struct mount *m, struct list_head *to_umount)
 {
 	m->mnt.mnt_flags |= MNT_UMOUNT;
-	list_del_init(&m->mnt_child);
 	move_from_ns(m);
 	list_add_tail(&m->mnt_list, to_umount);
 }
@@ -637,6 +636,7 @@ static void trim_ancestors(struct mount *m)
 static void trim_one(struct mount *m, struct list_head *to_umount)
 {
 	bool remove_this = false, found = false, umount_this = false;
+	bool undecided = false;
 	struct mount *n;
 
 	if (!is_candidate(m)) { // trim_ancestors() left it on list
@@ -645,17 +645,21 @@ static void trim_one(struct mount *m, struct list_head *to_umount)
 	}
 
 	list_for_each_entry(n, &m->mnt_mounts, mnt_child) {
-		if (!is_candidate(n)) {
-			found = true;
-			if (n != m->overmount) {
-				remove_this = true;
-				break;
-			}
+		if (will_be_unmounted(n))	// stays linked below m
+			continue;
+		if (is_candidate(n)) {
+			undecided = true;
+			continue;
+		}
+		found = true;
+		if (n != m->overmount) {
+			remove_this = true;
+			break;
 		}
 	}
 	if (found) {
 		trim_ancestors(m);
-	} else if (!IS_MNT_LOCKED(m) && list_empty(&m->mnt_mounts)) {
+	} else if (!IS_MNT_LOCKED(m) && !undecided) {
 		remove_this = true;
 		umount_this = true;
 	}
@@ -719,7 +723,9 @@ static void reparent(struct mount *m)
  * @set: the list of mounts to be unmounted.
  *
  * Collect all mounts that receive propagation from the mount in @set and have
- * no obstacles to being unmounted.  Add these additional mounts to the set.
+ * no obstacles to being unmounted.  Add these additional mounts to the set,
+ * root by root, each followed by its subtree in tree order.  They all stay
+ * linked below their parents, the caller takes them down.
  *
  * See Documentation/filesystems/propagate_umount.txt if you do anything in
  * this area.
@@ -746,14 +752,20 @@ void propagate_umount(struct list_head *set)
 		handle_locked(m, &to_umount);
 	}
 
-	// now to_umount consists of all acceptable candidates
-	// deal with reparenting of surviving overmounts on those
-	list_for_each_entry(m, &to_umount, mnt_list) {
-		struct mount *over = m->overmount;
-		if (over && !will_be_unmounted(over))
-			reparent(over);
+	// now to_umount consists of all acceptable candidates, still linked
+	// below their parents, so they form trees.  Fold them into the set
+	// tree by tree, each root followed by its subtree, and deal with
+	// reparenting of surviving overmounts on the way.
+	while (!list_empty(&to_umount)) {
+		m = list_first_entry(&to_umount, struct mount, mnt_list);
+		while (will_be_unmounted(m->mnt_parent))
+			m = m->mnt_parent;
+		for (p = m; p; p = next_mnt(p, m)) {
+			struct mount *over = p->overmount;
+			if (over && !will_be_unmounted(over))
+				reparent(over);
+			VFS_WARN_ON_ONCE(!will_be_unmounted(p));
+			list_move_tail(&p->mnt_list, set);
+		}
 	}
-
-	// and fold them into the set
-	list_splice_tail_init(&to_umount, set);
 }

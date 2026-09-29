@@ -335,16 +335,15 @@ loop removing them from the list (also no worse than O(#S) time),
 but it's easier to leave that until the next phase - there we will
 iterate through the candidates anyway.
 
-	The caller has already removed all elements of U from their parents'
-lists of children, which means that checking if child belongs to S is
-equivalent to checking if it's marked as a candidate; we'll never see
-the elements of U in the loop over children in Trim_one().
+	The elements of U stay on their parents' lists of children; they
+are marked (MNT_UMOUNT), so the loop over children in Trim_one() can
+recognize them and skip them.  Checking if a child belongs to S is
+checking that mark and the candidate mark.
 
-	What's more, if we see that children(m) is empty and m is not
-locked, we can immediately move m into the committed subset (remove
-from the parent's list of children, etc.).  That's one fewer mount we'll
-have to look into when we check the list of children of its parent *and*
-when we get to building the non-revealing subset.
+	What's more, if we see that all children of m belong to U and m
+is not locked, we can immediately move m into the committed subset.
+That's one fewer mount we'll have to look into when we get to building
+the non-revealing subset.
 
 		Maximal non-revealing subsets
 
@@ -370,7 +369,7 @@ or is equal to m.  Either way it must belong to S.  Contradiction.
 // S is a disjoint union of a non-revealing set U (the ones we are committed
 // to unmount) and a set of candidates, represented as a subset of list
 // elements that have "is a candidate" mark on them.
-// Elements of U are removed from their parents' lists of children.
+// Elements of U stay on their parents' lists of children, marked as such.
 // In the end candidates becomes empty and maximal non-revealing non-shifting
 // subset of S is now in U
 	while (Candidates list is non-empty)
@@ -392,7 +391,6 @@ handle_locked(m)
 	if p in U
 		cutoff = p
 	while m != cutoff
-		remove m from children(parent(m))
 		add m to U
 		m = parent(m)
 
@@ -432,6 +430,18 @@ Such children can only be root-overmounting (otherwise the set wouldn't
 be non-shifting) and their parents can not belong to the original set,
 since the original is guaranteed to be closed.
 
+		Handing the set back
+
+The additions have stayed linked below their parents, so once the set
+is final they form trees: every addition whose parent is not in the
+set is the root of one, everything else is reached from a root through
+the lists of children (a child that is not in the set can only be a
+root-overmount that gets reparented, see above).  Walk them and hand
+the set to the caller root by root, each root followed by its subtree
+in tree order, with the reparenting done on the way.  The caller takes
+them down in that order and may keep an unmounted mount attached to its
+unmounted parent; it wants a parent before its children for that.
+
 
 		Putting all of that together
 
@@ -439,8 +449,8 @@ The plan is to
 	* find all candidates
 	* trim down to maximal non-shifting subset
 	* trim down to maximal non-revealing subset
-	* reparent anything that needs to be reparented
-	* return the resulting set to the caller
+	* return the resulting set to the caller, root by root, and
+reparent anything that needs to be reparented on the way
 
 For the 2nd and 3rd steps we want to separate the set into growing
 non-revealing subset, initially containing the original set ("U" in

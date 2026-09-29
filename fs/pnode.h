@@ -56,6 +56,7 @@ void mnt_set_mountpoint(struct mount *, struct mountpoint *,
 void mnt_change_mountpoint(struct mount *parent, struct mountpoint *mp,
 			   struct mount *mnt);
 struct mount *copy_tree(struct mount *, struct dentry *, int);
+struct mount *next_mnt(struct mount *, struct mount *);
 bool is_path_reachable(struct mount *, struct dentry *,
 			 const struct path *root);
 int count_mounts(struct mnt_namespace *ns, struct mount *mnt);
