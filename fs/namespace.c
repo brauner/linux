@@ -45,6 +45,8 @@ static unsigned int m_hash_mask __ro_after_init;
 static unsigned int m_hash_shift __ro_after_init;
 static unsigned int mp_hash_mask __ro_after_init;
 static unsigned int mp_hash_shift __ro_after_init;
+static unsigned int slot_hash_mask __ro_after_init;
+static unsigned int slot_hash_shift __ro_after_init;
 
 static __initdata unsigned long mhash_entries;
 static int __init set_mhash_entries(char *str)
@@ -79,8 +81,11 @@ static u64 mnt_id_ctr = MNT_UNIQUE_ID_OFFSET;
 
 static struct hlist_head *mount_hashtable __ro_after_init;
 static struct hlist_head *mountpoint_hashtable __ro_after_init;
+static struct hlist_head *slot_hashtable __ro_after_init;
 static struct kmem_cache *mnt_cache __ro_after_init;
+static struct kmem_cache *mnt_slot_cache __ro_after_init;
 struct vfsmount *knullfs __ro_after_init;	/* private nullfs instance */
+static struct vfsmount *knullfs_file __ro_after_init;	/* its regular file */
 static DECLARE_RWSEM(namespace_sem);
 static HLIST_HEAD(unmounted);	/* protected by namespace_sem */
 static LIST_HEAD(ex_mountpoints); /* protected by namespace_sem */
@@ -211,6 +216,15 @@ static inline struct hlist_head *mp_hash(struct dentry *dentry)
 	return &mountpoint_hashtable[tmp & mp_hash_mask];
 }
 
+static inline struct hlist_head *slot_hash(struct vfsmount *mnt, struct dentry *dentry)
+{
+	unsigned long tmp = ((unsigned long)mnt / L1_CACHE_BYTES);
+
+	tmp += ((unsigned long)dentry / L1_CACHE_BYTES);
+	tmp = tmp + (tmp >> slot_hash_shift);
+	return &slot_hashtable[tmp & slot_hash_mask];
+}
+
 static int mnt_alloc_id(struct mount *mnt)
 {
 	int res;
@@ -323,6 +337,10 @@ static struct mount *alloc_vfsmnt(const char *name)
 		mnt->mnt_writers = 0;
 #endif
 
+		mnt->mnt_slot = kmem_cache_zalloc(mnt_slot_cache, GFP_KERNEL);
+		if (!mnt->mnt_slot)
+			goto out_free_pcp;
+
 		INIT_HLIST_NODE(&mnt->mnt_hash);
 		INIT_LIST_HEAD(&mnt->mnt_child);
 		INIT_LIST_HEAD(&mnt->mnt_mounts);
@@ -332,17 +350,19 @@ static struct mount *alloc_vfsmnt(const char *name)
 		INIT_HLIST_HEAD(&mnt->mnt_slave_list);
 		INIT_HLIST_NODE(&mnt->mnt_slave);
 		INIT_HLIST_NODE(&mnt->mnt_mp_list);
-		INIT_HLIST_HEAD(&mnt->mnt_stuck_children);
+		INIT_HLIST_HEAD(&mnt->mnt_slots);
 		INIT_HLIST_NODE(&mnt->mnt_ns_visible);
 		RB_CLEAR_NODE(&mnt->mnt_node);
 		mnt->mnt.mnt_idmap = &nop_mnt_idmap;
 	}
 	return mnt;
 
+out_free_pcp:
 #ifdef CONFIG_SMP
+	free_percpu(mnt->mnt_pcp);
 out_free_devname:
-	kfree_const(mnt->mnt_devname);
 #endif
+	kfree_const(mnt->mnt_devname);
 out_free_id:
 	mnt_free_id(mnt);
 out_free_cache:
@@ -737,6 +757,9 @@ int sb_prepare_remount_readonly(struct super_block *sb)
 static void free_vfsmnt(struct mount *mnt)
 {
 	mnt_idmap_put(mnt_idmap(&mnt->mnt));
+	/* NULL if it left it behind */
+	if (mnt->mnt_slot)
+		kmem_cache_free(mnt_slot_cache, mnt->mnt_slot);
 	kfree_const(mnt->mnt_devname);
 #ifdef CONFIG_SMP
 	free_percpu(mnt->mnt_pcp);
@@ -787,17 +810,32 @@ static bool legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 	return false;
 }
 
+/* The slot a child of @mnt left behind at @dentry. Same rules as __lookup_mnt(). */
+static struct mnt_slot *lookup_slot(struct vfsmount *mnt, struct dentry *dentry)
+{
+	struct hlist_head *head = slot_hash(mnt, dentry);
+	struct mnt_slot *slot;
+
+	hlist_for_each_entry_rcu(slot, head, hash)
+		if (&slot->parent->mnt == mnt && slot->dentry == dentry)
+			return slot;
+	return NULL;
+}
+
 /**
  * __lookup_mnt - mount hash lookup
  * @mnt:	parent mount
  * @dentry:	dentry of mountpoint
  *
  * If @mnt has a child mount @c mounted on @dentry find and return it.
+ * If @mnt is unmounted and a child that was unmounted with it left its
+ * slot behind at @dentry, return the stand-in for it instead: knullfs
+ * for a directory, its regular file for anything else.
  * Caller must either hold the spinlock component of @mount_lock or
  * hold rcu_read_lock(), sample the seqcount component before the call
  * and recheck it afterwards.
  *
- * Return: The child of @mnt mounted on @dentry or %NULL.
+ * Return: The child of @mnt mounted on @dentry, a stand-in or %NULL.
  */
 struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 {
@@ -807,6 +845,9 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 	hlist_for_each_entry_rcu(p, head, mnt_hash)
 		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
 			return p;
+	/* an unmounted mount keeps the slots of its unmounted children covered */
+	if (unlikely(mnt->mnt_flags & MNT_UMOUNT) && lookup_slot(mnt, dentry))
+		return real_mount(d_is_dir(dentry) ? knullfs : knullfs_file);
 	return NULL;
 }
 
@@ -922,6 +963,7 @@ mountpoint:
 	mp->m_dentry = dget(dentry);
 	hlist_add_head(&mp->m_hash, mp_hash(dentry));
 	INIT_HLIST_HEAD(&mp->m_list);
+	INIT_HLIST_HEAD(&mp->m_slots);
 	hlist_add_head(&m->node, &mp->m_list);
 	m->mp = no_free_ptr(mp);
 	read_sequnlock_excl(&mount_lock);
@@ -934,7 +976,7 @@ mountpoint:
  */
 static void maybe_free_mountpoint(struct mountpoint *mp, struct list_head *list)
 {
-	if (hlist_empty(&mp->m_list)) {
+	if (hlist_empty(&mp->m_list) && hlist_empty(&mp->m_slots)) {
 		struct dentry *dentry = mp->m_dentry;
 		spin_lock(&dentry->d_lock);
 		dentry->d_flags &= ~DCACHE_MOUNTED;
@@ -1019,6 +1061,41 @@ static void __umount_mnt(struct mount *mnt, struct list_head *shrink_list)
 static void umount_mnt(struct mount *mnt)
 {
 	__umount_mnt(mnt, &ex_mountpoints);
+}
+
+/*
+ * @mnt is unmounted together with its parent and would have stayed attached
+ * to it. Detach it but leave its slot behind so that a lookup on the parent
+ * at the mountpoint keeps finding a mount instead of what @mnt covered.
+ *
+ * locks: mount_lock[write_seqlock], namespace_sem[excl]
+ */
+static void leave_slot(struct mount *mnt)
+{
+	struct mnt_slot *slot = mnt->mnt_slot;
+	struct mount *parent = mnt->mnt_parent;
+
+	mnt->mnt_slot = NULL;
+	slot->parent = parent;
+	slot->dentry = mnt->mnt_mountpoint;
+	slot->mp = mnt->mnt_mp;
+	/* keeps the mountpoint once @mnt has let go of it */
+	hlist_add_head(&slot->pin, &slot->mp->m_slots);
+	hlist_add_head(&slot->owned, &parent->mnt_slots);
+	umount_mnt(mnt);
+	hlist_add_head_rcu(&slot->hash, slot_hash(&parent->mnt, slot->dentry));
+}
+
+/*
+ * locks: mount_lock[write_seqlock]
+ */
+static void drop_slot(struct mnt_slot *slot, struct list_head *shrink_list)
+{
+	hlist_del_rcu(&slot->hash);
+	hlist_del(&slot->pin);
+	hlist_del(&slot->owned);
+	maybe_free_mountpoint(slot->mp, shrink_list);
+	kfree_rcu(slot, rcu);
 }
 
 /*
@@ -1312,8 +1389,6 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 
 static void cleanup_mnt(struct mount *mnt)
 {
-	struct hlist_node *p;
-	struct mount *m;
 	/*
 	 * The warning here probably indicates that somebody messed
 	 * up a mnt_want/drop_write() pair.  If this happens, the
@@ -1324,10 +1399,6 @@ static void cleanup_mnt(struct mount *mnt)
 	WARN_ON(mnt_get_writers(mnt));
 	if (unlikely(mnt->mnt_pins.first))
 		mnt_pin_kill(mnt);
-	hlist_for_each_entry_safe(m, p, &mnt->mnt_stuck_children, mnt_umount) {
-		hlist_del(&m->mnt_umount);
-		mntput(&m->mnt);
-	}
 	fsnotify_vfsmount_delete(&mnt->mnt);
 	dput(mnt->mnt.mnt_root);
 	deactivate_super(mnt->mnt.mnt_sb);
@@ -1383,12 +1454,14 @@ static void noinline mntput_no_expire_slowpath(struct mount *mnt)
 	if (unlikely(!list_empty(&mnt->mnt_expire)))
 		list_del(&mnt->mnt_expire);
 
-	if (unlikely(!list_empty(&mnt->mnt_mounts))) {
-		struct mount *p, *tmp;
-		list_for_each_entry_safe(p, tmp, &mnt->mnt_mounts,  mnt_child) {
-			__umount_mnt(p, &list);
-			hlist_add_head(&p->mnt_umount, &mnt->mnt_stuck_children);
-		}
+	/* nothing stays attached to an unmounted mount */
+	VFS_WARN_ON_ONCE(!list_empty(&mnt->mnt_mounts));
+	if (unlikely(!hlist_empty(&mnt->mnt_slots))) {
+		struct mnt_slot *slot;
+		struct hlist_node *n;
+
+		hlist_for_each_entry_safe(slot, n, &mnt->mnt_slots, owned)
+			drop_slot(slot, &list);
 	}
 	unlock_mount_hash();
 	shrink_dentry_list(&list);
@@ -1767,18 +1840,15 @@ static bool disconnect_mount(struct mount *mnt, enum umount_tree_flags how)
 	if (!mnt_has_parent(mnt))
 		return true;
 
-	/* Because the reference counting rules change when mounts are
-	 * unmounted and connected, umounted mounts may not be
-	 * connected to mounted mounts.
-	 */
+	/* Only an unmounted parent has a slot to keep covered */
 	if (!(mnt->mnt_parent->mnt.mnt_flags & MNT_UMOUNT))
 		return true;
 
-	/* Has it been requested that the mount remain connected? */
+	/* Has it been requested that the mountpoint stays covered? */
 	if (how & UMOUNT_CONNECTED)
 		return false;
 
-	/* Is the mount locked such that it needs to remain connected? */
+	/* Is the mount locked such that its mountpoint must stay covered? */
 	if (IS_MNT_LOCKED(mnt))
 		return false;
 
@@ -1821,7 +1891,6 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 
 	while (!list_empty(&tmp_list)) {
 		struct mnt_namespace *ns;
-		bool disconnect;
 		p = list_first_entry(&tmp_list, struct mount, mnt_list);
 		list_del_init(&p->mnt_expire);
 		list_del_init(&p->mnt_list);
@@ -1834,17 +1903,13 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 		if (how & UMOUNT_SYNC)
 			p->mnt.mnt_flags |= MNT_SYNC_UMOUNT;
 
-		disconnect = disconnect_mount(p, how);
 		if (mnt_has_parent(p)) {
-			if (!disconnect) {
-				/* Don't forget about p */
-				list_add_tail(&p->mnt_child, &p->mnt_parent->mnt_mounts);
-			} else {
+			if (disconnect_mount(p, how))
 				umount_mnt(p);
-			}
+			else
+				leave_slot(p);
 		}
-		if (disconnect)
-			hlist_add_head(&p->mnt_umount, &unmounted);
+		hlist_add_head(&p->mnt_umount, &unmounted);
 
 		/*
 		 * At this point p->mnt_ns is NULL, notification will be queued
@@ -2000,6 +2065,8 @@ out:
 void __detach_mounts(struct dentry *dentry)
 {
 	struct pinned_mountpoint mp = {};
+	struct mnt_slot *slot;
+	struct hlist_node *n;
 	struct mount *mnt;
 
 	guard(namespace_excl)();
@@ -2011,12 +2078,11 @@ void __detach_mounts(struct dentry *dentry)
 	event++;
 	while (mp.node.next) {
 		mnt = hlist_entry(mp.node.next, struct mount, mnt_mp_list);
-		if (mnt->mnt.mnt_flags & MNT_UMOUNT) {
-			umount_mnt(mnt);
-			hlist_add_head(&mnt->mnt_umount, &unmounted);
-		}
-		else umount_tree(mnt, UMOUNT_CONNECTED);
+		umount_tree(mnt, UMOUNT_CONNECTED);
 	}
+	/* the dentry goes away, so do the slots left behind on it */
+	hlist_for_each_entry_safe(slot, n, &mp.mp->m_slots, pin)
+		drop_slot(slot, &ex_mountpoints);
 	unpin_mountpoint(&mp);
 }
 
@@ -6245,6 +6311,29 @@ static void __init mount_rootfs_on_nullfs(struct vfsmount *mnt,
 		attach_mnt(real_mount(mnt), mp.parent, mp.mp);
 }
 
+/*
+ * A second mount of knullfs rooted on an empty immutable regular file. It
+ * stands in for an unmounted mount where a file was mounted.
+ */
+static struct vfsmount *__init knullfs_file_mount(void)
+{
+	struct dentry *file;
+	struct mount *mnt;
+
+	file = nullfs_new_file(knullfs->mnt_sb);
+	if (IS_ERR(file))
+		return ERR_CAST(file);
+	mnt = clone_mnt(real_mount(knullfs), file, CL_PRIVATE);
+	dput(file);
+	if (IS_ERR(mnt))
+		return ERR_CAST(mnt);
+	mnt->mnt_ns = MNT_NS_INTERNAL;
+	mnt->mnt.mnt_flags |= MNT_INTERNAL | MNT_READONLY;
+	/* nothing is ever mounted on it either */
+	dont_mount(mnt->mnt.mnt_root);
+	return &mnt->mnt;
+}
+
 static void __init init_mount_tree(void)
 {
 	struct vfsmount *mnt, *nullfs_mnt;
@@ -6257,9 +6346,13 @@ static void __init init_mount_tree(void)
 	 * (1) nullfs with mount id 1
 	 * (2) mutable rootfs with mount id 2
 	 * (3) private nullfs for kthreads (SB_KERNMOUNT), kept in knullfs
+	 * (4) a second mount of (3) rooted on a regular file, kept in
+	 *     knullfs_file
 	 *
 	 * with (2) mounted on top of (1). The init_task's root and pwd
 	 * are pointed at (3) so all kthreads start isolated in nullfs.
+	 * A lookup at the slot an unmounted mount left behind finds (3)
+	 * or (4), see __lookup_mnt().
 	 */
 	nullfs_mnt = vfs_kern_mount(&nullfs_fs_type, 0, "nullfs", NULL);
 	if (IS_ERR(nullfs_mnt))
@@ -6298,6 +6391,9 @@ static void __init init_mount_tree(void)
 	dont_mount(knullfs->mnt_root);
 	/* and nothing is ever written through it */
 	knullfs->mnt_flags |= MNT_READONLY;
+	knullfs_file = knullfs_file_mount();
+	if (IS_ERR(knullfs_file))
+		panic("VFS: Failed to create the nullfs file stand-in");
 	root.mnt	= knullfs;
 	root.dentry	= knullfs->mnt_root;
 
@@ -6315,6 +6411,8 @@ void __init mnt_init(void)
 
 	mnt_cache = kmem_cache_create("mnt_cache", sizeof(struct mount),
 			0, SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT, NULL);
+	mnt_slot_cache = kmem_cache_create("mnt_slot", sizeof(struct mnt_slot),
+			0, SLAB_PANIC|SLAB_ACCOUNT, NULL);
 
 	mount_hashtable = alloc_large_system_hash("Mount-cache",
 				sizeof(struct hlist_head),
@@ -6326,6 +6424,11 @@ void __init mnt_init(void)
 				mphash_entries, 19,
 				HASH_ZERO,
 				&mp_hash_shift, &mp_hash_mask, 0, 0);
+	slot_hashtable = alloc_large_system_hash("Slot-cache",
+				sizeof(struct hlist_head),
+				0, 23,
+				HASH_ZERO,
+				&slot_hash_shift, &slot_hash_mask, 0, 0);
 
 	super_dev_init();
 

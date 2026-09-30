@@ -43,7 +43,25 @@ struct mnt_pcp {
 struct mountpoint {
 	struct hlist_node m_hash;
 	struct dentry *m_dentry;
-	struct hlist_head m_list;
+	struct hlist_head m_list;	/* mounts on it and pins */
+	struct hlist_head m_slots;	/* slots of unmounted parents */
+};
+
+/*
+ * What an unmounted mount leaves behind at its unmounted parent instead of
+ * staying attached to it. A lookup on the parent at the mountpoint finds
+ * a stand-in for as long as the slot is there. The parent frees it.
+ */
+struct mnt_slot {
+	struct hlist_node hash;		/* slot_hashtable, RCU */
+	struct hlist_node pin;		/* mp->m_slots, keeps the mountpoint */
+	union {
+		struct hlist_node owned;	/* parent->mnt_slots */
+		struct rcu_head rcu;		/* once unhashed */
+	};
+	struct mount *parent;		/* unmounted, no reference */
+	struct dentry *dentry;
+	struct mountpoint *mp;
 };
 
 struct mount {
@@ -87,7 +105,7 @@ struct mount {
 	struct mountpoint *mnt_mp;	/* where is it mounted */
 	union {
 		struct hlist_node mnt_mp_list;	/* list mounts with the same mountpoint */
-		struct hlist_node mnt_umount;
+		struct hlist_node mnt_umount;	/* on the unmounted list */
 	};
 #ifdef CONFIG_FSNOTIFY
 	struct fsnotify_mark_connector __rcu *mnt_fsnotify_marks;
@@ -101,7 +119,8 @@ struct mount {
 	int mnt_group_id;		/* peer group identifier */
 	int mnt_expiry_mark;		/* true if marked for expiry */
 	struct hlist_head mnt_pins;
-	struct hlist_head mnt_stuck_children;
+	struct mnt_slot *mnt_slot;	/* the one it may leave behind */
+	struct hlist_head mnt_slots;	/* left behind by its unmounted children */
 	struct hlist_node mnt_ns_visible; /* link in ns->mnt_visible_mounts */
 	struct mount *overmount;	/* mounted on ->mnt_root */
 } __randomize_layout;
