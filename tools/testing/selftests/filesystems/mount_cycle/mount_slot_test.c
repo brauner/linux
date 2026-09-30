@@ -4,7 +4,8 @@
  * leaves a slot behind instead. A lookup on the parent at the mountpoint
  * finds knullfs: an empty read-only directory that is shared by every slot
  * and every kernel thread, so it can't be watched or locked and nothing can
- * be mounted on it. The mount itself is a root from then on.
+ * be mounted on it. The mount itself is a root from then on. Where a file
+ * was mounted, the stand-in is an empty regular file of the same instance.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -67,6 +68,17 @@ static int write_file(const char *path, const char *s)
 	return n == (ssize_t)strlen(s) ? 0 : -1;
 }
 
+static int touch(const char *path)
+{
+	int fd;
+
+	fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+	if (fd < 0)
+		return -1;
+	close(fd);
+	return 0;
+}
+
 /* Become root in a new user namespace with a private mount namespace. */
 static int enter_userns(void)
 {
@@ -91,15 +103,17 @@ static int enter_userns(void)
 }
 
 /*
- * The child mounts P on @base/p and C on P/covered in a mount namespace of
- * its own, binds P a second time at @base/q and hands out descriptors on P
- * and on C. rmdir() of @base/p from here unmounts P together with C. P and C
- * are held by the descriptors and C leaves its slot behind. On request the
- * child removes C's mountpoint through the bind.
+ * The child mounts P on @base/p, C on P/covered and the file P/src on P/file
+ * in a mount namespace of its own, binds P a second time at @base/q and hands
+ * out descriptors on P and on C. rmdir() of @base/p from here unmounts P
+ * together with C and the file bind. P and C are held by the descriptors and
+ * the unmounted children leave their slots behind. On request the child
+ * removes C's mountpoint through the bind.
  */
 static int slot_child(const char *base, int to_parent, int from_parent)
 {
 	char p[PATH_LEN], c[PATH_LEN], q[PATH_LEN], qc[PATH_LEN];
+	char f[PATH_LEN], src[PATH_LEN];
 	int fds[2], ret;
 	char cmd;
 
@@ -111,30 +125,34 @@ static int slot_child(const char *base, int to_parent, int from_parent)
 	snprintf(c, sizeof(c), "%s/p/covered", base);
 	if (mkdir(c, 0755) || mount("tmpfs", c, "tmpfs", 0, NULL))
 		return 3;
+	snprintf(f, sizeof(f), "%s/p/file", base);
+	snprintf(src, sizeof(src), "%s/p/src", base);
+	if (touch(src) || touch(f) || mount(src, f, NULL, MS_BIND, NULL))
+		return 4;
 	snprintf(q, sizeof(q), "%s/q", base);
 	if (mkdir(q, 0755) || mount(p, q, NULL, MS_BIND, NULL))
-		return 4;
+		return 5;
 	fds[0] = open(p, O_PATH | O_DIRECTORY | O_CLOEXEC);
 	fds[1] = open(c, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 	if (fds[0] < 0 || fds[1] < 0)
-		return 5;
-	if (write(to_parent, fds, sizeof(fds)) != sizeof(fds))
 		return 6;
+	if (write(to_parent, fds, sizeof(fds)) != sizeof(fds))
+		return 7;
 
 	snprintf(qc, sizeof(qc), "%s/q/covered", base);
 	for (;;) {
 		if (read(from_parent, &cmd, 1) != 1)
-			return 7;
+			return 8;
 		switch (cmd) {
 		case CMD_RMDIR:
 			ret = rmdir(qc) ? errno : 0;
 			if (write(to_parent, &ret, sizeof(ret)) != sizeof(ret))
-				return 8;
+				return 9;
 			break;
 		case CMD_QUIT:
 			return 0;
 		default:
-			return 9;
+			return 10;
 		}
 	}
 }
@@ -362,6 +380,38 @@ TEST_F(mount_slot, slot_goes_with_mountpoint)
 	EXPECT_EQ(errno, ENOENT);
 	ASSERT_EQ(fstatfs(self->fd, &sf), 0);
 	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
+}
+
+/* where a file was mounted, the stand-in is an empty regular file */
+TEST_F(mount_slot, file_stand_in)
+{
+	char src[PATH_LEN], p[PATH_LEN];
+	struct statfs sf;
+	struct stat st;
+	char c;
+	int fd;
+
+	fd = openat(self->dfd, "file", O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ(fstat(fd, &st), 0);
+	EXPECT_TRUE(S_ISREG(st.st_mode));
+	ASSERT_EQ(fstatfs(fd, &sf), 0);
+	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
+	EXPECT_EQ(read(fd, &c, 1), 0);
+	EXPECT_EQ(flock(fd, LOCK_EX | LOCK_NB), -1);
+	EXPECT_EQ(errno, ENOLCK);
+
+	snprintf(src, sizeof(src), "%s/src", self->base);
+	ASSERT_EQ(touch(src), 0);
+	snprintf(p, sizeof(p), "/proc/self/fd/%d", fd);
+	EXPECT_EQ(mount(src, p, NULL, MS_BIND, NULL), -1);
+	EXPECT_EQ(errno, ENOENT);
+	close(fd);
+
+	EXPECT_EQ(openat(self->dfd, "file", O_WRONLY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, EPERM);
+	EXPECT_EQ(openat(self->dfd, "file", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOTDIR);
 }
 
 TEST_HARNESS_MAIN
