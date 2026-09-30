@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-TEST_GEN_PROGS := loop_cycle_test unmounted_tree_test overmount_reparent_test
+TEST_GEN_PROGS := loop_cycle_test unmounted_tree_test overmount_reparent_test mount_slot_test
 
 CFLAGS += -Wall -O2 -g $(KHDR_INCLUDES)
 
