@@ -47,6 +47,52 @@ static const struct file_operations nullfs_dir_operations = {
 	.fop_flags	= FOP_IMMUTABLE,
 };
 
+/* a file of nullfs is permanently empty */
+static ssize_t nullfs_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
+{
+	return 0;
+}
+
+/* an empty regular file, with the same refusals as the directory */
+static const struct file_operations nullfs_file_operations = {
+	.llseek		= generic_file_llseek,
+	.read_iter	= nullfs_file_read_iter,
+	.fsync		= noop_fsync,
+	.lock		= nullfs_nolock,
+	.flock		= nullfs_nolock,
+	.setlease	= nullfs_nolease,
+};
+
+/*
+ * An empty immutable regular file on @sb as a dentry of its own. It is
+ * never hashed under the root so no lookup finds it.
+ */
+struct dentry *nullfs_new_file(struct super_block *sb)
+{
+	struct dentry *dentry;
+	struct inode *inode;
+
+	inode = new_inode(sb);
+	if (!inode)
+		return ERR_PTR(-ENOMEM);
+
+	/* the root directory is 1 */
+	inode->i_ino = 2;
+	inode->i_mode = S_IFREG | 0444;
+	inode->i_fop = &nullfs_file_operations;
+	simple_inode_init_ts(inode);
+	/* ... and immutable, reading it leaves no trace either */
+	inode->i_flags |= S_IMMUTABLE | S_NOATIME;
+
+	dentry = d_alloc_anon(sb);
+	if (!dentry) {
+		iput(inode);
+		return ERR_PTR(-ENOMEM);
+	}
+	d_instantiate(dentry, inode);
+	return dentry;
+}
+
 static int nullfs_fs_fill_super(struct super_block *s, struct fs_context *fc)
 {
 	struct inode *inode;
