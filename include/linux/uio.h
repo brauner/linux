@@ -26,6 +26,7 @@ enum iter_type {
 	ITER_IOVEC,
 	ITER_BVEC,
 	ITER_KVEC,
+	ITER_BVECQ,
 	ITER_FOLIOQ,
 	ITER_XARRAY,
 	ITER_DISCARD,
@@ -68,6 +69,7 @@ struct iov_iter {
 				const struct iovec *__iov;
 				const struct kvec *kvec;
 				const struct bio_vec *bvec;
+				const struct bvecq *bvecq;
 				const struct folio_queue *folioq;
 				struct xarray *xarray;
 				void __user *ubuf;
@@ -77,6 +79,7 @@ struct iov_iter {
 	};
 	union {
 		unsigned long nr_segs;
+		u16 bvecq_slot;
 		u8 folioq_slot;
 		loff_t xarray_start;
 	};
@@ -143,6 +146,11 @@ static inline bool iov_iter_is_bvec(const struct iov_iter *i)
 static inline bool iov_iter_is_discard(const struct iov_iter *i)
 {
 	return iov_iter_type(i) == ITER_DISCARD;
+}
+
+static inline bool iov_iter_is_bvecq(const struct iov_iter *i)
+{
+	return iov_iter_type(i) == ITER_BVECQ;
 }
 
 static inline bool iov_iter_is_folioq(const struct iov_iter *i)
@@ -295,6 +303,9 @@ void iov_iter_kvec(struct iov_iter *i, unsigned int direction, const struct kvec
 void iov_iter_bvec(struct iov_iter *i, unsigned int direction, const struct bio_vec *bvec,
 			unsigned long nr_segs, size_t count);
 void iov_iter_discard(struct iov_iter *i, unsigned int direction, size_t count);
+void iov_iter_bvec_queue(struct iov_iter *i, unsigned int direction,
+			 const struct bvecq *bvecq,
+			 unsigned int first_slot, unsigned int offset, size_t count);
 void iov_iter_folio_queue(struct iov_iter *i, unsigned int direction,
 			  const struct folio_queue *folioq,
 			  unsigned int first_slot, unsigned int offset, size_t count);
