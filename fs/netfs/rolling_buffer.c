@@ -12,52 +12,6 @@
 #include <linux/slab.h>
 #include "internal.h"
 
-static atomic_t debug_ids;
-
-/**
- * netfs_folioq_alloc - Allocate a folio_queue struct
- * @rreq_id: Associated debugging ID for tracing purposes
- * @gfp: Allocation constraints
- * @trace: Trace tag to indicate the purpose of the allocation
- *
- * Allocate, initialise and account the folio_queue struct and log a trace line
- * to mark the allocation.
- */
-struct folio_queue *netfs_folioq_alloc(unsigned int rreq_id, gfp_t gfp,
-				       unsigned int /*enum netfs_folioq_trace*/ trace)
-{
-	struct folio_queue *fq;
-
-	if (gfp == GFP_KERNEL)
-		fq = mempool_alloc_noreserve(&netfs_folioq_pool, gfp);
-	else
-		fq = mempool_alloc(&netfs_folioq_pool, gfp);
-	if (fq) {
-		netfs_stat(&netfs_n_folioq);
-		folioq_init(fq, rreq_id);
-		fq->debug_id = atomic_inc_return(&debug_ids);
-		trace_netfs_folioq(fq, trace);
-	}
-	return fq;
-}
-EXPORT_SYMBOL(netfs_folioq_alloc);
-
-/**
- * netfs_folioq_free - Free a folio_queue struct
- * @folioq: The object to free
- * @trace: Trace tag to indicate which free
- *
- * Free and unaccount the folio_queue struct.
- */
-void netfs_folioq_free(struct folio_queue *folioq,
-		       unsigned int /*enum netfs_trace_folioq*/ trace)
-{
-	trace_netfs_folioq(folioq, trace);
-	netfs_stat_d(&netfs_n_folioq);
-	mempool_free(folioq, &netfs_folioq_pool);
-}
-EXPORT_SYMBOL(netfs_folioq_free);
-
 /*
  * Initialise a rolling buffer.  We allocate an empty folio queue struct to so
  * that the pointers can be independently driven by the producer and the
