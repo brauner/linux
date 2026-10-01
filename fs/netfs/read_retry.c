@@ -291,7 +291,7 @@ void netfs_retry_reads(struct netfs_io_request *rreq)
  */
 void netfs_unlock_abandoned_read_pages(struct netfs_io_request *rreq)
 {
-	struct folio_queue *p;
+	struct bvecq *p;
 
 	/* We have to wait for readahead refs to have been released before we
 	 * can unlock any folios as the ref-dropper walks i_pages and the only
@@ -301,24 +301,25 @@ void netfs_unlock_abandoned_read_pages(struct netfs_io_request *rreq)
 		netfs_wait_for_put_ra_refs(rreq);
 
 	for (p = rreq->buffer.tail; p; p = p->next) {
-		for (int slot = 0; slot < folioq_count(p); slot++) {
-			struct folio *folio = folioq_folio(p, slot);
+		for (int slot = rreq->buffer.first_tail_slot;
+		     bvecq_acquire_slot(p, slot);
+		     slot++) {
+			struct folio *folio;
 
-			if (!folio)
+			if (!p->bv[slot].bv_page)
 				continue;
+
+			folio = bvec_folio(&p->bv[slot]);
 			netfs_cancel_copy_to_cache(rreq, folio);
 
-			if (!folioq_is_marked2(p, slot)) {
-				if (folio == rreq->no_unlock_folio &&
-				    test_bit(NETFS_RREQ_NO_UNLOCK_FOLIO,
-					     &rreq->flags)) {
-					_debug("no unlock");
-				} else {
-					trace_netfs_folio(folio,
-						netfs_folio_trace_abandon);
-					folio_unlock(folio);
-				}
+			if (folio == rreq->no_unlock_folio &&
+			    test_bit(NETFS_RREQ_NO_UNLOCK_FOLIO, &rreq->flags)) {
+				_debug("no unlock");
+			} else {
+				trace_netfs_folio(folio, netfs_folio_trace_abandon);
+				folio_unlock(folio);
 			}
 		}
+		rreq->buffer.first_tail_slot = 0;
 	}
 }
