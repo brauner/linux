@@ -215,7 +215,7 @@ static void netfs_issue_read(struct netfs_io_request *rreq,
  * otherwise we set the deprecated PG_private_2.
  */
 static void netfs_mark_copy_to_cache(struct netfs_io_request *rreq,
-				     struct folio_queue **fq,
+				     struct bvecq **bq,
 				     unsigned int *offset,
 				     int *slot,
 				     size_t len,
@@ -225,21 +225,21 @@ static void netfs_mark_copy_to_cache(struct netfs_io_request *rreq,
 		struct folio *folio;
 		size_t fsize, overlap;
 
-		if (!*fq)
+		if (!*bq)
 			break;
-		if (*slot >= folioq_count(*fq)) {
-			*fq = (*fq)->next;
+		if (!bvecq_acquire_slot(*bq, *slot)) {
+			*bq = bvecq_next(*bq);
 			*slot = 0;
 			*offset = 0;
 			continue;
 		}
 
 		/* Determine how much the subreq overlaps the folio, if at all. */
-		fsize = folioq_folio_size(*fq, *slot);
+		fsize = (*bq)->bv[*slot].bv_len;
 		overlap = min(len, fsize - *offset);
 
 		if (overlap > 0 && copy) {
-			folio = folioq_folio(*fq, *slot);
+			folio = bvec_folio(&(*bq)->bv[*slot]);
 			if (netfs_using_pgpriv2(rreq)) {
 				if (!folio_test_private_2(folio))
 					folio_start_private_2(folio);
@@ -275,7 +275,7 @@ static void netfs_read_to_pagecache(struct netfs_io_request *rreq)
 		.cached_to[1]	= ULLONG_MAX,
 	};
 	struct fscache_occupancy *occ = &_occ;
-	struct folio_queue *fq = rreq->buffer.tail;
+	struct bvecq *bq = rreq->buffer.tail;
 	unsigned int offset = 0;
 	ssize_t size = rreq->len;
 	uoff_t start = rreq->start;
@@ -408,10 +408,10 @@ static void netfs_read_to_pagecache(struct netfs_io_request *rreq)
 		if (size <= 0)
 			netfs_all_subreqs_queued(rreq);
 
-		if (fq) {
+		if (bq) {
 			/* See if the cache indicated this should be cached. */
 			copy = test_bit(NETFS_SREQ_COPY_TO_CACHE, &subreq->flags);
-			netfs_mark_copy_to_cache(rreq, &fq, &slot, &offset, slice, copy);
+			netfs_mark_copy_to_cache(rreq, &bq, &slot, &offset, slice, copy);
 		}
 
 		trace_netfs_sreq(subreq, netfs_sreq_trace_submit);
@@ -479,8 +479,7 @@ void netfs_readahead(struct readahead_control *ractl)
 	 * acquires a ref on each folio that we will need to release later -
 	 * but we don't want to do that until after we've started the I/O.
 	 */
-	added = rolling_buffer_bulk_load_from_ra(&rreq->buffer, ractl,
-						 rreq->debug_id, rreq->gfp);
+	added = rolling_buffer_bulk_load_from_ra(&rreq->buffer, ractl, rreq->gfp);
 	if (added < 0) {
 		ret = added;
 		goto cleanup_free;
@@ -503,15 +502,14 @@ EXPORT_SYMBOL(netfs_readahead);
 /*
  * Create a rolling buffer with a single occupying folio.
  */
-static int netfs_create_singular_buffer(struct netfs_io_request *rreq, struct folio *folio,
-					unsigned int rollbuf_flags)
+static int netfs_create_singular_buffer(struct netfs_io_request *rreq, struct folio *folio)
 {
 	ssize_t added;
 
-	if (rolling_buffer_init(&rreq->buffer, rreq->debug_id, ITER_DEST, rreq->gfp) < 0)
+	if (rolling_buffer_init(&rreq->buffer, ITER_DEST, rreq->gfp, false) < 0)
 		return -ENOMEM;
 
-	added = rolling_buffer_append(&rreq->buffer, folio, rollbuf_flags, rreq->gfp);
+	added = rolling_buffer_append(&rreq->buffer, folio, rreq->gfp);
 	if (added < 0)
 		return added;
 	rreq->submitted = rreq->start + added;
@@ -661,7 +659,7 @@ int netfs_read_folio(struct file *file, struct folio *folio)
 	trace_netfs_read(rreq, rreq->start, rreq->len, netfs_read_trace_readpage);
 
 	/* Set up the output buffer */
-	ret = netfs_create_singular_buffer(rreq, folio, 0);
+	ret = netfs_create_singular_buffer(rreq, folio);
 	if (ret < 0)
 		goto discard;
 
@@ -818,7 +816,7 @@ retry:
 	trace_netfs_read(rreq, pos, len, netfs_read_trace_write_begin);
 
 	/* Set up the output buffer */
-	ret = netfs_create_singular_buffer(rreq, folio, 0);
+	ret = netfs_create_singular_buffer(rreq, folio);
 	if (ret < 0)
 		goto error_put;
 
@@ -883,7 +881,7 @@ int netfs_prefetch_for_write(struct file *file, struct folio *folio,
 	trace_netfs_read(rreq, start, flen, netfs_read_trace_prefetch_for_write);
 
 	/* Set up the output buffer */
-	ret = netfs_create_singular_buffer(rreq, folio, NETFS_ROLLBUF_PAGECACHE_MARK);
+	ret = netfs_create_singular_buffer(rreq, folio);
 	if (ret < 0)
 		goto error_put;
 
