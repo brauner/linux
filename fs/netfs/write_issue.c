@@ -107,7 +107,9 @@ struct netfs_io_request *netfs_create_write_req(struct address_space *mapping,
 	ictx = netfs_inode(wreq->inode);
 	if (is_cacheable)
 		fscache_begin_write_operation(&wreq->cache_resources, netfs_i_cookie(ictx));
-	if (rolling_buffer_init(&wreq->buffer, wreq->debug_id, ITER_SOURCE, wreq->gfp) < 0)
+	if (rolling_buffer_init(&wreq->buffer, ITER_SOURCE, wreq->gfp,
+				(origin == NETFS_WRITEBACK ||
+				 origin == NETFS_WRITEBACK_SINGLE)) < 0)
 		goto nomem;
 
 	wreq->cleaned_to = wreq->start;
@@ -162,12 +164,12 @@ void netfs_prepare_write(struct netfs_io_request *wreq,
 	struct netfs_io_subrequest *subreq;
 	struct iov_iter *wreq_iter = &wreq->buffer.iter;
 
-	/* Make sure we don't point the iterator at a used-up folio_queue
-	 * struct being used as a placeholder to prevent the queue from
-	 * collapsing.  In such a case, extend the queue.
+	/* Make sure we don't point the iterator at a used-up bvecq struct
+	 * being used as a placeholder to prevent the queue from collapsing.
+	 * In such a case, extend the queue.
 	 */
-	if (iov_iter_is_folioq(wreq_iter) &&
-	    wreq_iter->folioq_slot >= folioq_nr_slots(wreq_iter->folioq))
+	if (iov_iter_is_bvecq(wreq_iter) &&
+	    !bvecq_acquire_slot(wreq_iter->bvecq, wreq_iter->bvecq_slot))
 		rolling_buffer_make_space(&wreq->buffer, wreq->gfp);
 
 	subreq = netfs_alloc_subrequest(wreq, stream->source);
@@ -450,7 +452,7 @@ static int netfs_write_folio(struct netfs_io_request *wreq,
 	}
 
 	/* Attach the folio to the rolling buffer. */
-	rolling_buffer_append(&wreq->buffer, folio, 0, wreq->gfp);
+	rolling_buffer_append(&wreq->buffer, folio, wreq->gfp);
 
 	/* Move the submission point forward to allow for write-streaming data
 	 * not starting at the front of the page.  We don't do write-streaming
