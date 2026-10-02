@@ -452,7 +452,7 @@ be called from the writeback code to write the data to the cache, if there is
 one.
 
 The inode should be marked ``NETFS_ICTX_SINGLE_NO_UPLOAD`` if this API is to be
-used.  The writeback function requires the buffer to be of ITER_FOLIOQ type.
+used.
 
 High-Level VM API
 ==================
