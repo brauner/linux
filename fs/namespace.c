@@ -6375,8 +6375,8 @@ static struct vfsmount *__init knullfs_file_mount(void)
 	if (IS_ERR(mnt))
 		return ERR_CAST(mnt);
 	mnt->mnt_ns = MNT_NS_INTERNAL;
-	mnt->mnt.mnt_flags |= MNT_INTERNAL | MNT_READONLY;
-	/* nothing is ever mounted on it either */
+	mnt->mnt.mnt_flags |= MNT_INTERNAL;
+	mnt->mnt.mnt_flags &= ~MNT_READONLY;
 	dont_mount(mnt->mnt.mnt_root);
 	return &mnt->mnt;
 }

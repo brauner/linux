@@ -3,6 +3,7 @@
 #include <linux/fs/super_types.h>
 #include <linux/fs_context.h>
 #include <linux/magic.h>
+#include <linux/splice.h>
 
 #include "mount.h"
 
@@ -39,24 +40,65 @@ static const struct file_operations nullfs_dir_operations = {
 	.fop_flags	= FOP_IMMUTABLE,
 };
 
-/* a file of nullfs is permanently empty */
 static ssize_t nullfs_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
 	return 0;
 }
 
-/* an empty regular file, with the same refusals as the directory */
+static ssize_t nullfs_file_splice_read(struct file *in, loff_t *ppos,
+				       struct pipe_inode_info *pipe,
+				       size_t len, unsigned int flags)
+{
+	return 0;
+}
+
+static ssize_t nullfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+{
+	size_t count = iov_iter_count(from);
+
+	iov_iter_advance(from, count);
+	return count;
+}
+
+static int nullfs_pipe_to_null(struct pipe_inode_info *pipe,
+			       struct pipe_buffer *buf, struct splice_desc *sd)
+{
+	return sd->len;
+}
+
+static ssize_t nullfs_file_splice_write(struct pipe_inode_info *pipe,
+					struct file *out, loff_t *ppos,
+					size_t len, unsigned int flags)
+{
+	return splice_from_pipe(pipe, out, ppos, len, flags, nullfs_pipe_to_null);
+}
+
+static int nullfs_file_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
+			       struct iattr *attr)
+{
+	if (attr->ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID))
+		return -EPERM;
+	return 0;
+}
+
+static const struct inode_operations nullfs_file_inode_operations = {
+	.setattr	= nullfs_file_setattr,
+};
+
 static const struct file_operations nullfs_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read_iter	= nullfs_file_read_iter,
+	.write_iter	= nullfs_file_write_iter,
+	.splice_read	= nullfs_file_splice_read,
+	.splice_write	= nullfs_file_splice_write,
 	.fsync		= noop_fsync,
 	.lock		= nullfs_nolock,
 	.flock		= nullfs_nolock,
 };
 
 /*
- * An empty immutable regular file on @sb as a dentry of its own. It is
- * never hashed under the root so no lookup finds it.
+ * An empty regular file on @sb as a dentry of its own, never hashed under
+ * the root so no lookup finds it.
  */
 struct dentry *nullfs_new_file(struct super_block *sb)
 {
@@ -69,11 +111,11 @@ struct dentry *nullfs_new_file(struct super_block *sb)
 
 	/* the root directory is 1 */
 	inode->i_ino = 2;
-	inode->i_mode = S_IFREG | 0444;
+	inode->i_mode = S_IFREG | 0666;
+	inode->i_op = &nullfs_file_inode_operations;
 	inode->i_fop = &nullfs_file_operations;
 	simple_inode_init_ts(inode);
-	/* ... and immutable, reading it leaves no trace either */
-	inode->i_flags |= S_IMMUTABLE | S_NOATIME;
+	inode->i_flags |= S_NOATIME;
 
 	dentry = d_alloc_anon(sb);
 	if (!dentry) {
