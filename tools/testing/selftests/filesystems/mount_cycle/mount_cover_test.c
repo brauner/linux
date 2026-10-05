@@ -520,8 +520,22 @@ TEST_F(mount_cover, file_stand_in)
 	EXPECT_EQ(errno, ENOENT);
 	close(fd);
 
-	EXPECT_EQ(openat(self->dfd, "file", O_WRONLY | O_CLOEXEC), -1);
+	/* writes and truncates go nowhere, like /dev/null */
+	fd = openat(self->dfd, "file", O_WRONLY | O_TRUNC | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	EXPECT_EQ(write(fd, "xy", 2), 2);
+	EXPECT_EQ(ftruncate(fd, 4), 0);
+	ASSERT_EQ(fstat(fd, &st), 0);
+	EXPECT_EQ(st.st_size, 0);
+	/* the shared inode keeps its identity */
+	EXPECT_EQ(fchmod(fd, 0600), -1);
 	EXPECT_EQ(errno, EPERM);
+	close(fd);
+	fd = openat(self->dfd, "file", O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	EXPECT_EQ(read(fd, &c, 1), 0);
+	close(fd);
+
 	EXPECT_EQ(openat(self->dfd, "file", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
 	EXPECT_EQ(errno, ENOTDIR);
 }
