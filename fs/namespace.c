@@ -1503,6 +1503,8 @@ static void mntput_no_expire(struct mount *mnt)
 	mntput_no_expire_slowpath(mnt);
 }
 
+DEFINE_FREE(mntput_no_expire, struct mount *, if (_T) mntput_no_expire(_T))
+
 void mntput(struct vfsmount *mnt)
 {
 	if (mnt) {
@@ -1936,8 +1938,10 @@ static int do_umount_root(struct super_block *sb)
 	return ret;
 }
 
+/* Unmount @mnt, dropping the reference the caller holds to it on every path. */
 static int do_umount(struct mount *mnt, int flags)
 {
+	struct mount *ref __free(mntput_no_expire) = mnt;
 	struct super_block *sb = mnt->mnt.mnt_sb;
 	int retval;
 
@@ -2031,6 +2035,15 @@ static int do_umount(struct mount *mnt, int flags)
 			retval = 0;
 		}
 	}
+	/*
+	 * The caller's reference isn't the last one, the mount's own is, so
+	 * it can go under the lock that unmounted the mount: namespace_unlock()
+	 * then finds the mount held by nothing but itself.
+	 */
+	if (!retval) {
+		mnt_dec_count(mnt);
+		retain_and_null_ptr(ref);
+	}
 out:
 	unlock_mount_hash();
 	namespace_unlock();
@@ -2118,12 +2131,12 @@ int path_umount(const struct path *path, int flags)
 	int ret;
 
 	ret = can_umount(path, flags);
-	if (!ret)
-		ret = do_umount(mnt, flags);
-
 	/* we mustn't call path_put() as that would clear mnt_expiry_mark */
 	dput(path->dentry);
-	mntput_no_expire(mnt);
+	if (ret)
+		mntput_no_expire(mnt);
+	else
+		ret = do_umount(mnt, flags);
 	return ret;
 }
 
