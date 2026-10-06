@@ -782,7 +782,7 @@ int __legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 		return 0;
 	mnt = real_mount(bastard);
 	mnt_inc_count(mnt);
-	smp_mb();	/* see mntput_no_expire_slowpath() and do_umount() */
+	smp_mb();	/* see mntput_no_expire_slowpath(), mntput_unheld() and do_umount() */
 	if (likely(!read_seqretry(&mount_lock, seq)))
 		return 0;
 	lock_mount_hash();
@@ -1490,10 +1490,12 @@ static void mntput_no_expire(struct mount *mnt)
 		 * Since we don't do lock_mount_hash() here,
 		 * ->mnt_ns can change under us.  However, if it's
 		 * non-NULL, then there's a reference that won't
-		 * be dropped until after an RCU delay done after
-		 * turning ->mnt_ns NULL.  So if we observe it
-		 * non-NULL under rcu_read_lock(), the reference
-		 * we are dropping is not the final one.
+		 * be dropped until after turning ->mnt_ns NULL and
+		 * either an RCU delay or a look under mount_lock
+		 * that found it to be the only one left, which it
+		 * isn't while ours is counted (mntput_unheld()).
+		 * So if we observe it non-NULL under rcu_read_lock(),
+		 * the reference we are dropping is not the final one.
 		 */
 		smp_wmb();	/* pairs with the smp_mb() in mnt_get_count() */
 		mnt_dec_count(mnt);
@@ -1504,6 +1506,56 @@ static void mntput_no_expire(struct mount *mnt)
 }
 
 DEFINE_FREE(mntput_no_expire, struct mount *, if (_T) mntput_no_expire(_T))
+
+/*
+ * Drop the own reference of a mount that has left its namespace without
+ * waiting for a grace period, if the count under mount_lock says it is
+ * the only one: a holder's get is visible before its put, a walker's
+ * increment is visible unless the walker sees the seqcount change and
+ * drops it under mount_lock, and nobody can find the mount anymore.
+ * Returns false if somebody else still references the mount.
+ */
+static bool mntput_unheld(struct mount *mnt)
+{
+	LIST_HEAD(list);
+
+	VFS_BUG_ON(mnt->mnt_ns);
+	lock_mount_hash();
+	smp_mb();	/* see __legitimize_mnt() and mntput_no_expire() */
+	if (mnt_get_count(mnt) != 1) {
+		unlock_mount_hash();
+		return false;
+	}
+	mnt_dec_count(mnt);
+	mntput_final_locked(mnt, &list);
+	unlock_mount_hash();
+	shrink_dentry_list(&list);
+	mntput_queue_cleanup(mnt);
+	return true;
+}
+
+/*
+ * Put the mounts umount_tree() collected. The ones nothing else holds go
+ * right away; from the first one somebody holds, the rest go the plain
+ * way after the one grace period their holders' puts rely on.
+ */
+static void mntput_unmounted(struct hlist_head *head)
+{
+	struct hlist_node *p;
+	struct mount *m;
+	bool synced = false;
+
+	hlist_for_each_entry_safe(m, p, head, mnt_umount) {
+		hlist_del(&m->mnt_umount);
+		if (!synced) {
+			if (mntput_unheld(m))
+				continue;
+			synchronize_rcu_expedited();
+			synced = true;
+		}
+		mntput(&m->mnt);
+	}
+}
 
 void mntput(struct vfsmount *mnt)
 {
@@ -1528,7 +1580,9 @@ EXPORT_SYMBOL(mntget);
 /*
  * Make a mount point inaccessible to new lookups.
  * Because there may still be current users, the caller MUST WAIT
- * for an RCU grace period before destroying the mount point.
+ * for an RCU grace period before destroying the mount point, unless
+ * it finds under mount_lock that it holds the only reference left,
+ * see mntput_unheld().
  */
 void mnt_make_shortterm(struct vfsmount *mnt)
 {
@@ -1783,8 +1837,6 @@ static void free_mnt_ns(struct mnt_namespace *);
 static void namespace_unlock(void)
 {
 	struct hlist_head head;
-	struct hlist_node *p;
-	struct mount *m;
 	struct mnt_namespace *ns = emptied_ns;
 	LIST_HEAD(list);
 
@@ -1815,12 +1867,7 @@ static void namespace_unlock(void)
 	if (likely(hlist_empty(&head)))
 		return;
 
-	synchronize_rcu_expedited();
-
-	hlist_for_each_entry_safe(m, p, &head, mnt_umount) {
-		hlist_del(&m->mnt_umount);
-		mntput(&m->mnt);
-	}
+	mntput_unmounted(&head);
 }
 
 static inline void namespace_lock(void)
