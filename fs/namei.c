@@ -2116,7 +2116,8 @@ static int unlink_may_reveal(struct nameidata *nd, int flags,
 	/* only a name that went away while covered is flagged */
 	if (likely(!(READ_ONCE(dentry->d_flags) & DCACHE_UNCOVERED)))
 		return 0;
-	if (!cant_mount(dentry) || !d_unlinked(dentry))
+	/* d_invalidate() in ->unlink() detaches before dont_mount() runs */
+	if (!d_unlinked(dentry))
 		return 0;
 	dput(no_free_ptr(path->dentry));
 	return nd->flags & LOOKUP_REVAL ? -ENOENT : -ESTALE;
