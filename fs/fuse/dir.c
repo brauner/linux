@@ -460,7 +460,8 @@ static int fuse_dentry_revalidate(struct inode *dir, const struct qstr *name,
 			spin_unlock(&fi->lock);
 		}
 		kfree(forget);
-		if (ret == -ENOMEM || ret == -EINTR)
+		/* only these two say that the name doesn't lead to the inode */
+		if (ret && ret != -ENOENT && ret != -ESTALE)
 			goto out;
 		if (ret || fuse_invalid_attr(&outarg.attr) ||
 		    fuse_stale_inode(inode, outarg.generation, &outarg.attr))
