@@ -66,6 +66,13 @@ again:
 			goto fail;
 		}
 		cnid = be32_to_cpu(entry.folder.id);
+		/* hfsplus_readdir() hides it, so hide it here as well */
+		if (HFSPLUS_SB(sb)->hidden_dir &&
+		    cnid == HFSPLUS_SB(sb)->hidden_dir->i_ino) {
+			hfs_find_exit(&fd);
+			inode = NULL;
+			goto out;
+		}
 		dentry->d_fsdata = (void *)(unsigned long)cnid;
 	} else if (type == HFSPLUS_FILE) {
 		if (fd.entrylength < sizeof(struct hfsplus_cat_file)) {
