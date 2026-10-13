@@ -282,6 +282,11 @@ nfsd_lookup_dentry(struct svc_rqst *rqstp, struct svc_fh *fhp,
 				dput(dentry);
 				goto out_nfserr;
 			}
+		} else if (d_uncovered(dentry)) {
+			/* the name lost its mounts after the lookup */
+			dput(dentry);
+			host_err = -ENOENT;
+			goto out_nfserr;
 		}
 	}
 	*dentry_ret = dentry;
