@@ -930,11 +930,13 @@ v9fs_vfs_get_link_dotl(struct dentry *dentry,
 	return v9fs_vfs_get_link_nocache_dotl(dentry, inode, done);
 }
 
+/* Returns 1 and leaves the inode alone if the server reports another file type. */
 int v9fs_refresh_inode_dotl(struct p9_fid *fid, struct inode *inode)
 {
 	struct p9_stat_dotl *st;
 	struct v9fs_session_info *v9ses;
 	unsigned int flags;
+	int ret = 1;
 
 	v9ses = v9fs_inode2v9ses(inode);
 	st = p9_client_getattr_dotl(fid, P9_STATS_ALL);
@@ -953,9 +955,10 @@ int v9fs_refresh_inode_dotl(struct p9_fid *fid, struct inode *inode)
 	flags = (v9ses->cache & CACHE_LOOSE) ?
 		V9FS_STAT2INODE_KEEP_ISIZE : 0;
 	v9fs_stat2inode_dotl(st, inode, flags);
+	ret = 0;
 out:
 	kfree(st);
-	return 0;
+	return ret;
 }
 
 const struct inode_operations v9fs_dir_inode_operations_dotl = {

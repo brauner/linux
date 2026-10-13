@@ -175,16 +175,16 @@ static int __v9fs_lookup_revalidate(struct dentry *dentry, unsigned int flags)
 				 dentry, dentry);
 			return 0;
 		}
-		if (v9inode->cache_validity & V9FS_INO_INVALID_ATTR) {
-			p9_debug(P9_DEBUG_VFS, "dentry: %pd (%p) invalidated due to type change\n",
-				 dentry, dentry);
-			return 0;
-		}
 		if (retval < 0) {
 			p9_debug(P9_DEBUG_VFS,
 				"refresh inode: dentry = %pd (%p), got error %pe\n",
 				dentry, dentry, ERR_PTR(retval));
 			return retval;
+		}
+		if (retval > 0) {
+			p9_debug(P9_DEBUG_VFS, "dentry: %pd (%p) invalidated due to type change\n",
+				 dentry, dentry);
+			return 0;
 		}
 	}
 	p9_debug(P9_DEBUG_VFS, "dentry: %pd (%p) is valid\n", dentry, dentry);

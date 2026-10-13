@@ -1330,6 +1330,7 @@ v9fs_vfs_mknod(struct mnt_idmap *idmap, struct inode *dir,
 	return retval;
 }
 
+/* Returns 1 and leaves the inode alone if the server reports another file type. */
 int v9fs_refresh_inode(struct p9_fid *fid, struct inode *inode)
 {
 	int umode;
@@ -1337,6 +1338,7 @@ int v9fs_refresh_inode(struct p9_fid *fid, struct inode *inode)
 	struct p9_wstat *st;
 	struct v9fs_session_info *v9ses;
 	unsigned int flags;
+	int ret = 1;
 
 	v9ses = v9fs_inode2v9ses(inode);
 	st = p9_client_stat(fid);
@@ -1356,10 +1358,11 @@ int v9fs_refresh_inode(struct p9_fid *fid, struct inode *inode)
 	flags = (v9ses->cache & CACHE_LOOSE) ?
 		V9FS_STAT2INODE_KEEP_ISIZE : 0;
 	v9fs_stat2inode(st, inode, inode->i_sb, flags);
+	ret = 0;
 out:
 	p9stat_free(st);
 	kfree(st);
-	return 0;
+	return ret;
 }
 
 static const struct inode_operations v9fs_dir_inode_operations_dotu = {
