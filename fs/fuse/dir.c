@@ -361,6 +361,19 @@ static void fuse_invalidate_entry(struct dentry *entry)
 	fuse_invalidate_entry_cache(entry);
 }
 
+/*
+ * A request to remove or rename the entry failed. -ENOENT says that the
+ * name is gone. -EINTR says nothing, the request may never have reached
+ * the server, so only have the next lookup ask the server.
+ */
+static void fuse_entry_op_failed(struct dentry *entry, int err)
+{
+	if (err == -ENOENT)
+		fuse_invalidate_entry(entry);
+	else if (err == -EINTR)
+		fuse_invalidate_entry_cache(entry);
+}
+
 static void fuse_lookup_init(struct fuse_args *args, u64 nodeid,
 			     const struct qstr *name,
 			     struct fuse_entry_out *outarg)
@@ -1227,8 +1240,9 @@ static int fuse_unlink(struct inode *dir, struct dentry *entry)
 	if (!err) {
 		fuse_dir_changed(dir);
 		fuse_entry_unlinked(entry);
-	} else if (err == -EINTR || err == -ENOENT)
-		fuse_invalidate_entry(entry);
+	} else {
+		fuse_entry_op_failed(entry, err);
+	}
 	return err;
 }
 
@@ -1251,8 +1265,9 @@ static int fuse_rmdir(struct inode *dir, struct dentry *entry)
 	if (!err) {
 		fuse_dir_changed(dir);
 		fuse_entry_unlinked(entry);
-	} else if (err == -EINTR || err == -ENOENT)
-		fuse_invalidate_entry(entry);
+	} else {
+		fuse_entry_op_failed(entry, err);
+	}
 	return err;
 }
 
@@ -1292,15 +1307,14 @@ static int fuse_rename_common(struct mnt_idmap *idmap, struct inode *olddir, str
 		/* newent will end up negative */
 		if (!(flags & RENAME_EXCHANGE) && d_really_is_positive(newent))
 			fuse_entry_unlinked(newent);
-	} else if (err == -EINTR || err == -ENOENT) {
-		/* If request was interrupted, DEITY only knows if the
-		   rename actually took place.  If the invalidation
-		   fails (e.g. some process has CWD under the renamed
-		   directory), then there can be inconsistency between
-		   the dcache and the real filesystem.  Tough luck. */
-		fuse_invalidate_entry(oldent);
+	} else {
+		/*
+		 * If request was interrupted, DEITY only knows if the
+		 * rename actually took place.
+		 */
+		fuse_entry_op_failed(oldent, err);
 		if (d_really_is_positive(newent))
-			fuse_invalidate_entry(newent);
+			fuse_entry_op_failed(newent, err);
 	}
 
 	return err;
