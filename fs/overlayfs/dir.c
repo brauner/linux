@@ -842,10 +842,10 @@ static int ovl_remove_and_whiteout(struct dentry *dentry,
 	}
 
 	err = ovl_cleanup_and_whiteout(ofs, upperdir, upper);
-	if (!err)
+	if (!err) {
 		ovl_dir_modified(dentry->d_parent, true);
-
-	d_drop(dentry);
+		d_drop(dentry);
+	}
 out_dput_upper:
 	dput(upper);
 out_dput:
