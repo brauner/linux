@@ -150,10 +150,12 @@ int afs_sillyrename(struct afs_vnode *dvnode, struct afs_vnode *vnode,
 		d_move(dentry, sdentry);
 		break;
 	case -ERESTARTSYS:
-		/* The result of the rename is unknown. Play it safe by forcing
-		 * a new lookup.
+		/*
+		 * The result of the rename is unknown. Forget the silly name
+		 * and leave the dentry alone: it keeps its mounts and the
+		 * next revalidation sees the directory change if the server
+		 * did rename.
 		 */
-		d_drop(dentry);
 		d_drop(sdentry);
 	}
 

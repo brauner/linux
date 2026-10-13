@@ -1972,6 +1972,9 @@ static void afs_rename_exchange_edit_dir(struct afs_operation *op)
 
 	_enter("op=%08x", op->debug_id);
 
+	/* d_exchange() hashes both */
+	op->rename.rehash = NULL;
+
 	if (new_dvnode == orig_dvnode) {
 		down_write(&orig_dvnode->validate_lock);
 		if (test_bit(AFS_VNODE_DIR_VALID, &orig_dvnode->flags) &&
@@ -2135,7 +2138,9 @@ static int afs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 		op->ops		= &afs_rename_noreplace_operation;
 	} else if (flags & RENAME_EXCHANGE) {
 		op->ops		= &afs_rename_exchange_operation;
+		/* hashed again if the exchange fails, see afs_rename_put() */
 		d_drop(new_dentry);
+		op->rename.rehash = new_dentry;
 	} else {
 		/* If we might displace the target, we might need to do silly
 		 * rename.
