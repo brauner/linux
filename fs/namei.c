@@ -1881,8 +1881,12 @@ static struct dentry *lookup_fast(struct nameidata *nd)
 		status = d_revalidate(nd->inode, &nd->last, dentry, nd->flags);
 	}
 	if (unlikely(status <= 0)) {
-		if (!status)
-			d_invalidate(dentry);
+		/*
+		 * Nothing here keeps a rename() from moving the dentry, so
+		 * a "no" for nd->last may not be about this dentry anymore.
+		 * Leave it to the slow path, which asks again with the
+		 * parent locked and invalidates there.
+		 */
 		dput(dentry);
 		return ERR_PTR(status);
 	}
