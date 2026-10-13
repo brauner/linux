@@ -1981,6 +1981,12 @@ static int __cifs_unlink(struct inode *dir, struct dentry *dentry, bool sillyren
 	if (unlikely(cifs_forced_shutdown(cifs_sb)))
 		return smb_EIO(smb_eio_trace_forced_shutdown);
 
+	tlink = cifs_sb_tlink(cifs_sb);
+	if (IS_ERR(tlink))
+		return PTR_ERR(tlink);
+	tcon = tlink_tcon(tlink);
+	server = tcon->ses->server;
+
 	/* Unhash dentry in advance to prevent any concurrent opens */
 	spin_lock(&dentry->d_lock);
 	if (!d_unhashed(dentry)) {
@@ -1988,12 +1994,6 @@ static int __cifs_unlink(struct inode *dir, struct dentry *dentry, bool sillyren
 		rehash = true;
 	}
 	spin_unlock(&dentry->d_lock);
-
-	tlink = cifs_sb_tlink(cifs_sb);
-	if (IS_ERR(tlink))
-		return PTR_ERR(tlink);
-	tcon = tlink_tcon(tlink);
-	server = tcon->ses->server;
 
 	xid = get_xid();
 	page = alloc_dentry_path();
@@ -2559,6 +2559,12 @@ cifs_rename2(struct mnt_idmap *idmap, struct inode *source_dir,
 	if (unlikely(cifs_forced_shutdown(cifs_sb)))
 		return smb_EIO(smb_eio_trace_forced_shutdown);
 
+	tlink = cifs_sb_tlink(cifs_sb);
+	if (IS_ERR(tlink))
+		return PTR_ERR(tlink);
+	tcon = tlink_tcon(tlink);
+	server = tcon->ses->server;
+
 	/*
 	 * Prevent any concurrent opens on the target by unhashing the dentry.
 	 * VFS already unhashes the target when renaming directories.
@@ -2569,12 +2575,6 @@ cifs_rename2(struct mnt_idmap *idmap, struct inode *source_dir,
 			rehash = true;
 		}
 	}
-
-	tlink = cifs_sb_tlink(cifs_sb);
-	if (IS_ERR(tlink))
-		return PTR_ERR(tlink);
-	tcon = tlink_tcon(tlink);
-	server = tcon->ses->server;
 
 	page1 = alloc_dentry_path();
 	page2 = alloc_dentry_path();
