@@ -155,6 +155,14 @@ retry:
 					return;
 				}
 			}
+			/*
+			 * The entry can come from a reply that is older than
+			 * the dentry: the buffer is kept across getdents()
+			 * calls. Let ->d_revalidate() ask the server.
+			 */
+			CIFS_I(inode)->time = 0;
+			dput(dentry);
+			return;
 		}
 		d_invalidate(dentry);
 		dput(dentry);
