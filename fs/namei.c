@@ -5699,7 +5699,8 @@ int vfs_unlink(struct mnt_idmap *idmap, struct inode *dir,
 			if (error)
 				goto out;
 			error = dir->i_op->unlink(dir, dentry);
-			if (!error) {
+			/* a sillyrenamed dentry is still the name of a file, see below */
+			if (!error && !(dentry->d_flags & DCACHE_NFSFS_RENAMED)) {
 				dont_mount(dentry);
 				detach_mounts(dentry);
 			}
@@ -6267,8 +6268,11 @@ int vfs_rename(struct renamedata *rd)
 			shrink_dcache_parent(new_dentry);
 			target->i_flags |= S_DEAD;
 		}
-		dont_mount(new_dentry);
-		detach_mounts(new_dentry);
+		/* a sillyrenamed target is still the name of a file */
+		if (!(new_dentry->d_flags & DCACHE_NFSFS_RENAMED)) {
+			dont_mount(new_dentry);
+			detach_mounts(new_dentry);
+		}
 	}
 	if (!(old_dir->i_sb->s_type->fs_flags & FS_RENAME_DOES_D_MOVE)) {
 		if (!(flags & RENAME_EXCHANGE))
