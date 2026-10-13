@@ -219,6 +219,7 @@ static inline struct hlist_head *mp_hash(struct dentry *dentry)
 struct mnt_cover {
 	struct hlist_node node;		/* parent->mnt_covers, RCU */
 	struct hlist_node pin;		/* mp->m_covers, keeps the mountpoint */
+	struct mount *parent;		/* the unmounted mount that holds it */
 	struct dentry *dentry;
 	struct mountpoint *mp;
 	struct rcu_head rcu;
@@ -1068,6 +1069,7 @@ static void leave_cover(struct mount *mnt)
 	struct mnt_cover *cover = mnt->mnt_cover;
 
 	mnt->mnt_cover = NULL;
+	cover->parent = mnt->mnt_parent;
 	cover->dentry = mnt->mnt_mountpoint;
 	cover->mp = mnt->mnt_mp;
 	/* keeps the mountpoint once @mnt has let go of it */
@@ -2032,6 +2034,9 @@ out:
  * what they covered. DCACHE_UNCOVERED tells a walk that found it earlier
  * that the mounts are gone. The caller removes it for good afterwards.
  *
+ * A mount on the root of its parent isn't reached by the name and stays.
+ * So does the cover such a mount left behind on its unmounted parent.
+ *
  * The caller may hold dentry->d_inode->i_rwsem.
  */
 void __detach_mounts(struct dentry *dentry)
@@ -2055,11 +2060,25 @@ void __detach_mounts(struct dentry *dentry)
 	event++;
 	while (mp.node.next) {
 		mnt = hlist_entry(mp.node.next, struct mount, mnt_mp_list);
+		/*
+		 * A mount on the root of its parent is reached by crossing
+		 * onto the parent, not by the name. It stays and goes away
+		 * with the parent, so step over it.
+		 */
+		if (mnt->mnt_parent->mnt.mnt_root == dentry) {
+			hlist_del(&mp.node);
+			hlist_add_behind(&mp.node, &mnt->mnt_mp_list);
+			continue;
+		}
 		umount_tree(mnt, UMOUNT_COVER);
 	}
 	/* the dentry goes away, so do the covers left behind on it */
-	hlist_for_each_entry_safe(cover, n, &mp.mp->m_covers, pin)
+	hlist_for_each_entry_safe(cover, n, &mp.mp->m_covers, pin) {
+		/* unless it covers the root of the unmounted mount that holds it */
+		if (cover->parent->mnt.mnt_root == dentry)
+			continue;
 		drop_cover(cover, &ex_mountpoints);
+	}
 	unpin_mountpoint(&mp);
 }
 

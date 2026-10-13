@@ -1848,11 +1848,17 @@ void shrink_dcache_for_umount(struct super_block *sb)
 static enum d_walk_ret find_submount(void *_data, struct dentry *dentry)
 {
 	struct dentry **victim = _data;
-	if (d_mountpoint(dentry)) {
-		*victim = dget_dlock(dentry);
-		return D_WALK_QUIT;
-	}
-	return D_WALK_CONTINUE;
+
+	if (!d_mountpoint(dentry))
+		return D_WALK_CONTINUE;
+	/*
+	 * __detach_mounts() has been through it already. A mount on the
+	 * root of its parent stays, so it is still a mountpoint.
+	 */
+	if (d_unhashed(dentry) && (dentry->d_flags & DCACHE_UNCOVERED))
+		return D_WALK_CONTINUE;
+	*victim = dget_dlock(dentry);
+	return D_WALK_QUIT;
 }
 
 /**
@@ -2716,6 +2722,8 @@ static void __d_rehash(struct dentry *entry)
 {
 	struct hlist_bl_head *b = d_hash(entry->d_name.hash);
 
+	/* it has a name again, see __detach_mounts() */
+	entry->d_flags &= ~DCACHE_UNCOVERED;
 	hlist_bl_lock(b);
 	hlist_bl_add_head_rcu(&entry->d_hash, b);
 	hlist_bl_unlock(b);
