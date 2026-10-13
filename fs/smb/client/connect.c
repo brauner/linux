@@ -4451,6 +4451,13 @@ wait_for_construction:
 	}
 
 	tlink->tl_tcon = cifs_construct_tcon(cifs_sb, fsuid);
+	/*
+	 * The error is about the connection. Callers such as ->d_revalidate()
+	 * take -ENOENT and -ESTALE for an answer about the file.
+	 */
+	if (tlink->tl_tcon == ERR_PTR(-ENOENT) ||
+	    tlink->tl_tcon == ERR_PTR(-ESTALE))
+		tlink->tl_tcon = ERR_PTR(-EACCES);
 	clear_bit(TCON_LINK_PENDING, &tlink->tl_flags);
 	wake_up_bit(&tlink->tl_flags, TCON_LINK_PENDING);
 
