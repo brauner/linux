@@ -402,6 +402,17 @@ static inline int d_unlinked(const struct dentry *dentry)
 	return d_unhashed(dentry) && !IS_ROOT(dentry);
 }
 
+/*
+ * The name lost its mounts while the caller held the dentry.
+ * __detach_mounts() marks and unhashes a dentry before it detaches
+ * what covered it. The mark goes when the dentry is hashed again.
+ */
+static inline bool d_uncovered(const struct dentry *dentry)
+{
+	return unlikely(READ_ONCE(dentry->d_flags) & DCACHE_UNCOVERED) &&
+	       d_unlinked(dentry);
+}
+
 static inline int cant_mount(const struct dentry *dentry)
 {
 	return (dentry->d_flags & DCACHE_CANT_MOUNT);

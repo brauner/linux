@@ -1671,11 +1671,19 @@ EXPORT_SYMBOL(follow_down_one);
 int follow_down(struct path *path, unsigned int flags)
 {
 	struct vfsmount *mnt = path->mnt;
+	struct dentry *dentry = path->dentry;
 	bool jumped;
 	int ret = traverse_mounts(path, &jumped, NULL, flags);
 
 	if (path->mnt != mnt)
 		mntput(mnt);
+	/*
+	 * Nothing held the name between the caller's lookup and this. If
+	 * it lost its mounts in between we would end on what they covered,
+	 * see unlink_may_reveal().
+	 */
+	if (!ret && path->dentry == dentry && d_uncovered(dentry))
+		ret = -ENOENT;
 	return ret;
 }
 EXPORT_SYMBOL(follow_down);
@@ -2124,10 +2132,7 @@ static int unlink_may_reveal(struct nameidata *nd, int flags,
 	if (path->dentry != dentry)
 		return 0;
 	/* only a name that went away while covered is flagged */
-	if (likely(!(READ_ONCE(dentry->d_flags) & DCACHE_UNCOVERED)))
-		return 0;
-	/* d_invalidate() in ->unlink() detaches before dont_mount() runs */
-	if (!d_unlinked(dentry))
+	if (likely(!d_uncovered(dentry)))
 		return 0;
 	dput(no_free_ptr(path->dentry));
 	if (path->mnt != nd->path.mnt)
