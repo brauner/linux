@@ -6094,6 +6094,13 @@ struct inode *btrfs_lookup_dentry(struct inode *dir, struct dentry *dentry)
 	if (dentry->d_name.len > BTRFS_NAME_LEN)
 		return ERR_PTR(-ENAMETOOLONG);
 
+	/*
+	 * The subvolume is deleted and d_invalidate() has taken every mount
+	 * below it away. Don't hand out what those mounts covered.
+	 */
+	if (btrfs_root_refs(&root->root_item) == 0)
+		return ERR_PTR(-ENOENT);
+
 	ret = btrfs_inode_by_name(BTRFS_I(dir), dentry, &location, &di_type);
 	if (ret < 0)
 		return ERR_PTR(ret);
