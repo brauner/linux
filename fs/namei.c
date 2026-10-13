@@ -2110,8 +2110,14 @@ static int unlink_may_reveal(struct nameidata *nd, int flags,
 	/* ".." and LOOKUP_DOWN may land on an unhashed directory */
 	if (flags & WALK_NOFOLLOW)
 		return 0;
-	/* We crossed onto a mount and the name led us here while it still existed */
-	if (path->mnt != nd->path.mnt)
+	/*
+	 * We crossed onto the root of a mount and the name led us there
+	 * while it still existed. The reference on @dentry went with the
+	 * first crossing and a race with several mount --move can lead
+	 * back to the mount we started on, so compare the dentries. A
+	 * bind of @dentry on itself leads to @dentry again.
+	 */
+	if (path->dentry != dentry)
 		return 0;
 	/* only a name that went away while covered is flagged */
 	if (likely(!(READ_ONCE(dentry->d_flags) & DCACHE_UNCOVERED)))
@@ -2120,6 +2126,8 @@ static int unlink_may_reveal(struct nameidata *nd, int flags,
 	if (!d_unlinked(dentry))
 		return 0;
 	dput(no_free_ptr(path->dentry));
+	if (path->mnt != nd->path.mnt)
+		mntput(path->mnt);
 	return nd->flags & LOOKUP_REVAL ? -ENOENT : -ESTALE;
 }
 
