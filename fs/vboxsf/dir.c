@@ -198,10 +198,15 @@ static int vboxsf_dentry_revalidate(struct inode *dir, const struct qstr *name,
 	if (flags & LOOKUP_RCU)
 		return -ECHILD;
 
-	if (d_really_is_positive(dentry))
-		return vboxsf_inode_revalidate(dentry) == 0;
-	else
-		return vboxsf_stat_dentry(dentry, NULL) == -ENOENT;
+	if (d_really_is_positive(dentry)) {
+		int err = vboxsf_inode_revalidate(dentry);
+
+		/* only these two say that the name is gone */
+		if (err == -ENOENT || err == -ESTALE)
+			return 0;
+		return err < 0 ? err : 1;
+	}
+	return vboxsf_stat_dentry(dentry, NULL) == -ENOENT;
 }
 
 const struct dentry_operations vboxsf_dentry_ops = {
