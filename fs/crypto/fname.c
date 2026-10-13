@@ -509,6 +509,16 @@ int fscrypt_d_revalidate(struct inode *dir, const struct qstr *name,
 	if (err < 0)
 		return err;
 
-	return !fscrypt_has_encryption_key(dir);
+	if (!fscrypt_has_encryption_key(dir))
+		return 1;
+	/*
+	 * The directory and all below it live on under the plaintext name.
+	 * Unhash the dentry here so that d_invalidate() leaves the mounts
+	 * on and below it alone. The lookup of the plaintext name moves it
+	 * there with its children.
+	 */
+	if (d_is_dir(dentry))
+		d_drop(dentry);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(fscrypt_d_revalidate);
