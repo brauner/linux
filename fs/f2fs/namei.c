@@ -1115,23 +1115,32 @@ static int f2fs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 	inode_set_ctime_current(old_inode);
 	f2fs_mark_inode_dirty_sync(old_inode, true);
 
-	f2fs_delete_entry(old_entry, old_folio, old_dir, NULL);
-	old_folio = NULL;
-
 	if (whiteout) {
-		set_inode_flag(whiteout, FI_INC_LINK);
-		err = f2fs_add_link(old_dentry, whiteout);
-		if (err) {
-			d_invalidate(old_dentry);
-			d_invalidate(new_dentry);
-			goto put_out_dir;
-		}
+		/*
+		 * Reuse the old entry for the whiteout. That can't fail,
+		 * unlike a delete followed by an add, which may need a new
+		 * block and leaves the rename half done on error.
+		 */
+		if (F2FS_OPTION(sbi).fsync_mode == FSYNC_MODE_STRICT)
+			f2fs_add_ino_entry(sbi, old_dir->i_ino, TRANS_DIR_INO);
+		f2fs_set_link(old_dir, old_entry, old_folio, whiteout);
+
+		f2fs_down_write(&F2FS_I(whiteout)->i_sem);
+		file_lost_pino(whiteout);
+		f2fs_remove_orphan_inode(sbi, whiteout->i_ino);
+		f2fs_i_links_write(whiteout, true);
+		f2fs_i_pino_write(whiteout, old_dir->i_ino);
+		f2fs_up_write(&F2FS_I(whiteout)->i_sem);
+
 		spin_lock(&whiteout->i_lock);
 		inode_state_clear(whiteout, I_LINKABLE);
 		spin_unlock(&whiteout->i_lock);
 
 		iput(whiteout);
+	} else {
+		f2fs_delete_entry(old_entry, old_folio, old_dir, NULL);
 	}
+	old_folio = NULL;
 
 	if (old_dir_entry)
 		f2fs_set_link(old_inode, old_dir_entry, old_dir_folio, new_dir);
