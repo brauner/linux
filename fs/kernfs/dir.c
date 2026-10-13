@@ -1217,17 +1217,28 @@ static int kernfs_dop_revalidate(struct inode *dir, const struct qstr *name,
 	down_read(&root->kernfs_rwsem);
 
 	/* The kernfs node has been deactivated */
-	if (!kernfs_active(kn))
+	if (!kernfs_active(kn)) {
+		/*
+		 * kernfs_show() can bring a hidden file back. Keep the
+		 * mounts on it: a walk crosses onto them and never sees
+		 * the file.
+		 */
+		if ((kn->flags & (KERNFS_HIDDEN | KERNFS_REMOVING)) ==
+		    KERNFS_HIDDEN && d_mountpoint(dentry)) {
+			up_read(&root->kernfs_rwsem);
+			return 1;
+		}
 		goto out_bad;
+	}
 
 	parent = kernfs_parent(kn);
 	/* The kernfs node has been moved? */
 	if (kernfs_dentry_node(dentry->d_parent) != parent)
-		goto out_bad;
+		goto out_moved;
 
 	/* The kernfs node has been renamed */
 	if (strcmp(dentry->d_name.name, kernfs_rcu_name(kn)) != 0)
-		goto out_bad;
+		goto out_moved;
 
 	/* The kernfs node has been moved to a different namespace */
 	if (parent && kernfs_ns_enabled(parent) &&
@@ -1236,6 +1247,15 @@ static int kernfs_dop_revalidate(struct inode *dir, const struct qstr *name,
 
 	up_read(&root->kernfs_rwsem);
 	return 1;
+out_moved:
+	/*
+	 * The directory and all below it live on under another name.
+	 * Unhash it here so that d_invalidate() leaves the mounts below
+	 * it alone. The lookup of the new name moves it there with its
+	 * children.
+	 */
+	if (kernfs_type(kn) == KERNFS_DIR)
+		d_drop(dentry);
 out_bad:
 	up_read(&root->kernfs_rwsem);
 	return 0;
