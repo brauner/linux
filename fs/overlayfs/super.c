@@ -109,11 +109,13 @@ static int ovl_revalidate_real(struct dentry *d, unsigned int flags, bool weak)
 		release_dentry_name_snapshot(&n);
 		if (!(flags & LOOKUP_RCU))
 			dput(parent);
-		if (!ret) {
-			if (!(flags & LOOKUP_RCU))
-				d_invalidate(d);
+		/*
+		 * No lock on the real parent keeps a rename in the layer from
+		 * moving the dentry, so leave the invalidation to the lookup
+		 * in the layer. -ESTALE gets the overlay dentry invalidated.
+		 */
+		if (!ret)
 			ret = -ESTALE;
-		}
 	}
 	return ret;
 }
