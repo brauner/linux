@@ -101,7 +101,11 @@ out:
 	return err;
 
 out_drop:
-	d_drop(dentry);
+	/*
+	 * No lock keeps a rename from moving the dentry, so the answer may
+	 * be about a name it no longer has. The VFS repeats the walk with
+	 * LOOKUP_REVAL and that walk checks the dentry by name.
+	 */
 	err = -EOPENSTALE;
 	goto out_put_ctx;
 }
