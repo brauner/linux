@@ -72,13 +72,15 @@ static atomic_int estale_readlink;	/* fail this pid's next readlink with ESTALE 
 static atomic_int walker;
 
 static atomic_int games;		/* make d/f findable and unlink it under the walker */
+static atomic_int rename_d;		/* rename d to e in the walker's next revalidation of d */
+static atomic_int d_is_e;		/* d has been renamed to e */
 static atomic_int cover_tfd = -1;	/* cover d/f in this copy of F as well */
 static atomic_int f_findable;
 static atomic_long nr_unlinks;
 
 /* ---- a helper thread runs the syscalls a server thread waits for ---- */
 
-enum job_kind { JOB_NONE, JOB_STAT, JOB_UNLINK, JOB_COVER };
+enum job_kind { JOB_NONE, JOB_STAT, JOB_UNLINK, JOB_COVER, JOB_RENAME };
 
 static pthread_mutex_t job_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
@@ -116,12 +118,18 @@ static void *helper(void *arg)
 		job = JOB_NONE;
 		pthread_mutex_unlock(&job_lock);
 
-		if (k == JOB_STAT)
+		if (k == JOB_STAT) {
 			ret = stat(job_path, &st) ? -errno : 0;
-		else if (k == JOB_UNLINK)
+		} else if (k == JOB_UNLINK) {
 			ret = unlink(job_path) ? -errno : 0;
-		else
+		} else if (k == JOB_RENAME) {
+			char to[160];
+
+			snprintf(to, sizeof(to), "%s/e", fmnt);
+			ret = rename(job_path, to) ? -errno : 0;
+		} else {
 			ret = cover(atomic_load(&cover_tfd), job_name);
+		}
 
 		pthread_mutex_lock(&job_lock);
 		job_ret = ret;
@@ -225,9 +233,21 @@ static void lookup(struct fuse_in_header *ih, const char *name)
 		reply_entry(ih->unique, F1_ID, atomic_load(&f1_valid));
 	} else if (ih->nodeid == ROOT_ID && !strcmp(name, "lnk")) {
 		reply_entry(ih->unique, LNK_ID, 3600);
-	} else if (ih->nodeid == ROOT_ID && !strcmp(name, "d")) {
+	} else if (ih->nodeid == ROOT_ID && (!strcmp(name, "d") || !strcmp(name, "e"))) {
+		bool is_e = name[0] == 'e';
+
+		/*
+		 * The walker revalidates d: rename it to e first. The answer
+		 * is then about a name the directory no longer has.
+		 */
+		if (!is_e && from_walker && atomic_exchange(&rename_d, 0))
+			run_job(JOB_RENAME, "d");
+		if (is_e != !!atomic_load(&d_is_e)) {
+			reply(ih->unique, -ENOENT, NULL, 0);
+			return;
+		}
 		/* the walker revalidates d: have d/f looked up (and covered) again */
-		if (from_walker && atomic_load(&games)) {
+		if (!is_e && from_walker && atomic_load(&games)) {
 			int ret = atomic_load(&cover_tfd) >= 0 ?
 				  run_job(JOB_COVER, "d/f") : run_job(JOB_STAT, "d/f");
 
@@ -323,6 +343,22 @@ static void *server(void *arg)
 				atomic_store(&f1_present, 0);
 			reply(ih->unique, 0, NULL, 0);
 			break;
+		case FUSE_RENAME: {
+			struct fuse_rename_in *ri = in;
+			const char *from = (const char *)(ri + 1);
+			const char *to = from + strlen(from) + 1;
+
+			/* only d <-> e in the root */
+			if (ih->nodeid != ROOT_ID || ri->newdir != ROOT_ID ||
+			    strcmp(from, atomic_load(&d_is_e) ? "e" : "d") ||
+			    strcmp(to, atomic_load(&d_is_e) ? "d" : "e")) {
+				reply(ih->unique, -EINVAL, NULL, 0);
+				break;
+			}
+			atomic_store(&d_is_e, !atomic_load(&d_is_e));
+			reply(ih->unique, 0, NULL, 0);
+			break;
+		}
 		case FUSE_FLUSH:
 		case FUSE_RELEASE:
 		case FUSE_RELEASEDIR:
@@ -575,6 +611,53 @@ TEST_F(unlink_reval, covered_name_keeps_going)
 			TH_LOG("read \"%s\" under the detached MARK", w.buf);
 		}
 	}
+}
+
+/*
+ * The walker revalidates d while a rename moves it to e. The server answers
+ * that revalidation only after the rename went through, so the answer is
+ * about a name the directory no longer has. The mounts below it have to
+ * survive that: F'/e/f still has to show MARK.
+ */
+TEST_F(unlink_reval, renamed_dir_keeps_its_mounts)
+{
+	struct walk w = {};
+	char buf[16] = {};
+	struct stat st;
+	int fd;
+
+	ASSERT_EQ(0, stat(fmnt, &st));
+	self->tfd = syscall(SYS_open_tree, AT_FDCWD, fmnt, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
+	ASSERT_GE(self->tfd, 0);
+	/* d and d/f are in the dcache, every walk revalidates d */
+	ASSERT_EQ(0, fstatat(self->tfd, "d/f", &st, 0));
+	ASSERT_EQ(0, cover(self->tfd, "d/f"));
+	fd = openat(self->tfd, "d/f", O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ((ssize_t)sizeof(MARK) - 1, read(fd, buf, sizeof(buf) - 1));
+	ASSERT_STREQ(MARK, buf);
+	close(fd);
+
+	atomic_store(&rename_d, 1);
+	ASSERT_EQ(0, walk_start(&w, self->tfd, "d/f", false));
+	ASSERT_EQ(0, walk_wait(&w, WALK_SECS)) {
+		TH_LOG("open() of F'/d/f did not return");
+	}
+	EXPECT_EQ(0, atomic_load(&rename_d)) {
+		TH_LOG("d was never revalidated");
+	}
+	EXPECT_EQ(1, atomic_load(&d_is_e));
+	EXPECT_EQ(ENOENT, w.err);
+
+	/* the mounts below d went to e with it */
+	memset(buf, 0, sizeof(buf));
+	fd = openat(self->tfd, "e/f", O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	ASSERT_GT(read(fd, buf, sizeof(buf) - 1), 0);
+	EXPECT_STREQ(MARK, buf) {
+		TH_LOG("read \"%s\" below the renamed directory", buf);
+	}
+	close(fd);
 }
 
 /* The same without mounts: nothing to reveal, but it must end as well. */
