@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -463,6 +464,40 @@ TEST_F(detach_mounts, escaped_dir_holds_its_parent)
 	ret = wait_child(pid);
 	TH_LOG("child exit code %d", ret);
 	EXPECT_EQ(ret, CHILD_OK);
+}
+
+/*
+ * A bind on a file below /proc/<pid> loses its object when the process
+ * goes away. proc invalidates the directory and the mount goes with it,
+ * so the proc instance can be unmounted afterwards.
+ */
+TEST_F(detach_mounts, dead_process_takes_its_mounts)
+{
+	char proc[PATH_LEN], comm[PATH_LEN], mask[PATH_LEN], buf[16];
+	pid_t pid;
+
+	snprintf(proc, sizeof(proc), "%s/proc", self->base);
+	snprintf(mask, sizeof(mask), "%s/F/mask", self->base);
+	ASSERT_EQ(mkdir(proc, 0755), 0);
+	ASSERT_EQ(mount("proc", proc, "proc", 0, NULL), 0);
+
+	pid = fork();
+	ASSERT_GE(pid, 0);
+	if (pid == 0) {
+		pause();
+		_exit(0);
+	}
+	snprintf(comm, sizeof(comm), "%s/proc/%d/comm", self->base, pid);
+	ASSERT_EQ(mount(mask, comm, NULL, MS_BIND, NULL), 0);
+	ASSERT_EQ(read_word(comm, buf, sizeof(buf)), 0);
+	ASSERT_STREQ(buf, MASK);
+	ASSERT_EQ(count_mounts_below(proc), 2);
+
+	ASSERT_EQ(kill(pid, SIGKILL), 0);
+	ASSERT_EQ(waitpid(pid, NULL, 0), pid);
+	/* the process is gone and so is the mount on it */
+	EXPECT_EQ(count_mounts_below(proc), 1);
+	EXPECT_EQ(umount2(proc, 0), 0);
 }
 
 TEST_HARNESS_MAIN
