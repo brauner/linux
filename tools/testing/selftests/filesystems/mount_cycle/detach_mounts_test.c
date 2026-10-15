@@ -307,4 +307,162 @@ TEST_F(detach_mounts, self_bind_race)
 	EXPECT_EQ(ret, CHILD_OK);
 }
 
+/* mounts whose mountpoint is @path or below it, from /proc/self/mountinfo */
+static int count_mounts_below(const char *path)
+{
+	char line[512], mp[PATH_LEN];
+	size_t len = strlen(path);
+	FILE *f;
+	int n = 0;
+
+	f = fopen("/proc/self/mountinfo", "r");
+	if (!f)
+		return -1;
+	while (fgets(line, sizeof(line), f)) {
+		if (sscanf(line, "%*d %*d %*d:%*d %*s %127s", mp) != 1)
+			continue;
+		if (!strncmp(mp, path, len) && (mp[len] == '\0' || mp[len] == '/'))
+			n++;
+	}
+	fclose(f);
+	return n;
+}
+
+/* What @name below @dfd reads, "" if it can't be read. */
+static int read_word_at(int dfd, const char *name, char *buf, size_t len)
+{
+	ssize_t n = 0;
+	int fd;
+
+	fd = openat(dfd, name, O_RDONLY | O_CLOEXEC);
+	if (fd >= 0) {
+		n = read(fd, buf, len - 1);
+		close(fd);
+	}
+	buf[n > 0 ? n : 0] = 0;
+	return fd < 0 ? -1 : 0;
+}
+
+/*
+ * M1 binds F/a on T and M2 covers T/sub/under. A rename of F/a/sub to
+ * F/c/sub moves the mountpoint of M2 out from under the root of M1 and
+ * nobody reaches M2 by name anymore. It stays attached all the same: a
+ * walk that still stands on T/sub crosses onto it and reads the mask,
+ * and M1 can't be unmounted without MNT_DETACH. The rename back brings
+ * it within reach again.
+ */
+TEST_F(detach_mounts, escaped_dir_keeps_its_mounts)
+{
+	char a[PATH_LEN], c[PATH_LEN], t[PATH_LEN], sub[PATH_LEN];
+	char mask[PATH_LEN], from[PATH_LEN], to[PATH_LEN];
+	char under[PATH_LEN], file[PATH_LEN], buf[16];
+	int sfd;
+
+	snprintf(a, sizeof(a), "%s/F/a", self->base);
+	snprintf(c, sizeof(c), "%s/F/c", self->base);
+	snprintf(t, sizeof(t), "%s/T", self->base);
+	snprintf(sub, sizeof(sub), "%s/T/sub", self->base);
+	snprintf(mask, sizeof(mask), "%s/F/mask", self->base);
+	snprintf(from, sizeof(from), "%s/F/a/sub", self->base);
+	snprintf(to, sizeof(to), "%s/F/c/sub", self->base);
+	snprintf(under, sizeof(under), "%s/T/sub/under", self->base);
+	snprintf(file, sizeof(file), "%s/F/a/sub/under", self->base);
+	ASSERT_EQ(mkdir(a, 0755), 0);
+	ASSERT_EQ(mkdir(c, 0755), 0);
+	ASSERT_EQ(mkdir(from, 0755), 0);
+	ASSERT_EQ(create_file(file, "UNDER"), 0);
+
+	ASSERT_EQ(mount(a, t, NULL, MS_BIND, NULL), 0);
+	/* a walk that got to T/sub before anything happened */
+	sfd = open(sub, O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(sfd, 0);
+	ASSERT_EQ(mount(mask, under, NULL, MS_BIND, NULL), 0);
+	ASSERT_EQ(read_word(under, buf, sizeof(buf)), 0);
+	ASSERT_STREQ(buf, MASK);
+	ASSERT_EQ(count_mounts_below(t), 2);
+
+	/* sub itself is no mountpoint, so the rename goes through */
+	ASSERT_EQ(rename(from, to), 0);
+	EXPECT_EQ(read_word_at(sfd, "under", buf, sizeof(buf)), 0);
+	EXPECT_STREQ(buf, MASK);
+	snprintf(file, sizeof(file), "%s/F/c/sub/under", self->base);
+	EXPECT_EQ(read_word(file, buf, sizeof(buf)), 0);
+	EXPECT_STREQ(buf, "UNDER");
+	EXPECT_EQ(umount2(t, 0), -1);
+	EXPECT_EQ(errno, EBUSY);
+
+	ASSERT_EQ(rename(to, from), 0);
+	EXPECT_EQ(read_word_at(sfd, "under", buf, sizeof(buf)), 0);
+	EXPECT_STREQ(buf, MASK);
+	EXPECT_EQ(read_word(under, buf, sizeof(buf)), 0);
+	EXPECT_STREQ(buf, MASK);
+	close(sfd);
+	EXPECT_EQ(umount2(under, 0), 0);
+	EXPECT_EQ(umount2(t, 0), 0);
+}
+
+/*
+ * The same with M2 on T/sub itself. Then sub is a mountpoint in the mount
+ * namespace of the child and the rename has to come from the parent's,
+ * where it isn't one. Nothing in M1 leads to M2 anymore, but it is still
+ * attached and keeps M1 busy.
+ */
+static int escaped_child(const char *base, int to_parent, int from_parent)
+{
+	char a[PATH_LEN], t[PATH_LEN], sub[PATH_LEN];
+	int tfd;
+
+	snprintf(a, sizeof(a), "%s/F/a", base);
+	snprintf(t, sizeof(t), "%s/T", base);
+	snprintf(sub, sizeof(sub), "%s/T/sub", base);
+	if (unshare(CLONE_NEWNS))
+		return CHILD_SETUP;
+	if (mount(a, t, NULL, MS_BIND, NULL) ||
+	    mount("tmpfs", sub, "tmpfs", 0, NULL))
+		return CHILD_SETUP;
+	tfd = open(t, O_PATH | O_DIRECTORY | O_CLOEXEC);
+	if (tfd < 0 || count_mounts_below(t) != 2)
+		return CHILD_SETUP;
+	if (send_byte(to_parent) || wait_byte(from_parent))
+		return CHILD_SETUP;
+	/* sub left F/a */
+	if (!faccessat(tfd, "sub", F_OK, 0) || errno != ENOENT)
+		return CHILD_STEP1;
+	close(tfd);
+	/* and M2 went with it, still attached to M1 */
+	if (!umount2(t, 0) || errno != EBUSY)
+		return CHILD_STEP2;
+	if (umount2(t, MNT_DETACH))
+		return CHILD_STEP3;
+	return CHILD_OK;
+}
+
+TEST_F(detach_mounts, escaped_dir_holds_its_parent)
+{
+	char a[PATH_LEN], c[PATH_LEN], from[PATH_LEN], to[PATH_LEN];
+	pid_t pid;
+	int ret;
+
+	snprintf(a, sizeof(a), "%s/F/a", self->base);
+	snprintf(c, sizeof(c), "%s/F/c", self->base);
+	snprintf(from, sizeof(from), "%s/F/a/sub", self->base);
+	snprintf(to, sizeof(to), "%s/F/c/sub", self->base);
+	ASSERT_EQ(mkdir(a, 0755), 0);
+	ASSERT_EQ(mkdir(c, 0755), 0);
+	ASSERT_EQ(mkdir(from, 0755), 0);
+
+	pid = fork();
+	ASSERT_GE(pid, 0);
+	if (pid == 0)
+		_exit(escaped_child(self->base, self->from_child[1],
+				    self->to_child[0]));
+	ASSERT_EQ(wait_byte(self->from_child[0]), 0);
+	/* nothing is mounted on F/a/sub here */
+	ASSERT_EQ(rename(from, to), 0);
+	ASSERT_EQ(send_byte(self->to_child[1]), 0);
+	ret = wait_child(pid);
+	TH_LOG("child exit code %d", ret);
+	EXPECT_EQ(ret, CHILD_OK);
+}
+
 TEST_HARNESS_MAIN
