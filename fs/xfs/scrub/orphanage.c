@@ -503,7 +503,12 @@ xrep_adoption_zap_dcache(
 	while ((d_child = d_find_alias(VFS_I(sc->ip))) != NULL) {
 		trace_xrep_adoption_invalidate_child(sc->mp, d_child);
 
-		d_invalidate(d_child);
+		/* a directory alias comes back unhashed as well, once is enough */
+		if (d_unhashed(d_child)) {
+			dput(d_child);
+			break;
+		}
+		d_invalidate_removed(d_child);
 		dput(d_child);
 	}
 }
