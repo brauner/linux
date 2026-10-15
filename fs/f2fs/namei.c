@@ -1122,8 +1122,9 @@ static int f2fs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 		set_inode_flag(whiteout, FI_INC_LINK);
 		err = f2fs_add_link(old_dentry, whiteout);
 		if (err) {
+			/* the source comes back under its new name, the target is gone */
 			d_invalidate(old_dentry);
-			d_invalidate(new_dentry);
+			d_invalidate_removed(new_dentry);
 			goto put_out_dir;
 		}
 		spin_lock(&whiteout->i_lock);
