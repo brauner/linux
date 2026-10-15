@@ -4922,7 +4922,7 @@ out_undead:
 out_up_write:
 	up_write(&fs_info->subvol_sem);
 	if (!ret) {
-		d_invalidate(dentry);
+		d_invalidate_removed(dentry);
 		btrfs_prune_dentries(dest);
 		ASSERT(dest->send_in_progress == 0);
 	}
