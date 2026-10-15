@@ -916,7 +916,7 @@ void eventfs_remove_events_dir(struct eventfs_inode *ei)
 	 * sticks around while the other ei->dentry are created
 	 * and destroyed dynamically.
 	 */
-	d_invalidate(dentry);
+	d_invalidate_removed(dentry);
 	d_make_discardable(dentry);
 }
 
