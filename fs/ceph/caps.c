@@ -3501,7 +3501,7 @@ static void invalidate_aliases(struct inode *inode)
 	d_prune_aliases(inode);
 	/*
 	 * For non-directory inode, d_find_alias() only returns
-	 * hashed dentry. After calling d_invalidate(), the
+	 * hashed dentry. After calling d_invalidate_removed(), the
 	 * dentry becomes unhashed.
 	 *
 	 * For directory inode, d_find_alias() can return
@@ -3513,7 +3513,7 @@ static void invalidate_aliases(struct inode *inode)
 			dput(dn);
 			break;
 		}
-		d_invalidate(dn);
+		d_invalidate_removed(dn);
 		if (prev)
 			dput(prev);
 		prev = dn;
