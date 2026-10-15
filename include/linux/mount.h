@@ -94,6 +94,7 @@ extern void mnt_set_expiry(struct vfsmount *mnt, struct list_head *expiry_list);
 extern void mark_mounts_for_expiry(struct list_head *mounts);
 
 extern bool path_is_mountpoint(const struct path *path);
+extern bool d_has_mounts(struct dentry *dentry);
 
 extern bool our_mnt(struct vfsmount *mnt);
 

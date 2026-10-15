@@ -916,20 +916,48 @@ struct pinned_mountpoint {
 	struct mount *parent;
 };
 
-static bool lookup_mountpoint(struct dentry *dentry, struct pinned_mountpoint *m)
+/* locks: mount_lock */
+static struct mountpoint *__lookup_mountpoint(struct dentry *dentry)
 {
-	struct hlist_head *chain = mp_hash(dentry);
 	struct mountpoint *mp;
 
-	hlist_for_each_entry(mp, chain, m_hash) {
-		if (mp->m_dentry == dentry) {
-			hlist_add_head(&m->node, &mp->m_list);
-			m->mp = mp;
-			return true;
-		}
-	}
-	return false;
+	hlist_for_each_entry(mp, mp_hash(dentry), m_hash)
+		if (mp->m_dentry == dentry)
+			return mp;
+	return NULL;
 }
+
+static bool lookup_mountpoint(struct dentry *dentry, struct pinned_mountpoint *m)
+{
+	struct mountpoint *mp = __lookup_mountpoint(dentry);
+
+	if (!mp)
+		return false;
+	hlist_add_head(&m->node, &mp->m_list);
+	m->mp = mp;
+	return true;
+}
+
+/**
+ * d_has_mounts - is anything mounted on a dentry?
+ * @dentry: the dentry
+ *
+ * True if a mount in any mount namespace sits on @dentry. The covers
+ * that detached mounts left behind keep DCACHE_MOUNTED set, so
+ * d_mountpoint() can't tell. This looks at the mountpoint instead.
+ */
+bool d_has_mounts(struct dentry *dentry)
+{
+	struct mountpoint *mp;
+
+	if (!d_mountpoint(dentry))
+		return false;
+
+	guard(mount_locked_reader)();
+	mp = __lookup_mountpoint(dentry);
+	return mp && !hlist_empty(&mp->m_list);
+}
+EXPORT_SYMBOL(d_has_mounts);
 
 static int get_mountpoint(struct dentry *dentry, struct pinned_mountpoint *m)
 {
