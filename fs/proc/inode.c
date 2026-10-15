@@ -139,13 +139,13 @@ void proc_invalidate_siblings_dcache(struct hlist_head *inodes, spinlock_t *lock
 		if (S_ISDIR(inode->i_mode)) {
 			struct dentry *dir = d_find_any_alias(inode);
 			if (dir) {
-				d_invalidate(dir);
+				d_invalidate_removed(dir);
 				dput(dir);
 			}
 		} else {
 			struct dentry *dentry;
 			while ((dentry = d_find_alias(inode))) {
-				d_invalidate(dentry);
+				d_invalidate_removed(dentry);
 				dput(dentry);
 			}
 		}
