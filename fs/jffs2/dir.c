@@ -870,7 +870,7 @@ static int jffs2_rename (struct mnt_idmap *idmap,
 		 * for that sucker and we have to trigger mount eviction - the
 		 * caller won't do it on its own since we are returning an error.
 		 */
-		d_invalidate(new_dentry);
+		d_invalidate_removed(new_dentry);
 		inode_set_mtime_to_ts(new_dir_i,
 				      inode_set_ctime_to_ts(new_dir_i, ITIME(now)));
 		return ret;
