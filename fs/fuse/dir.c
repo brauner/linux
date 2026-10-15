@@ -13,6 +13,7 @@
 #include <linux/moduleparam.h>
 #include <linux/sched.h>
 #include <linux/namei.h>
+#include <linux/mount.h>
 #include <linux/slab.h>
 #include <linux/xattr.h>
 #include <linux/iversion.h>
@@ -1625,8 +1626,13 @@ int fuse_reverse_inval_entry(struct fuse_conn *fc, u64 parent_nodeid,
 		goto unlock;
 
 	fuse_dir_changed(parent);
-	if (!(flags & FUSE_EXPIRE_ONLY))
-		d_invalidate(entry);
+	if (!(flags & FUSE_EXPIRE_ONLY)) {
+		/* a deleted entry takes its mounts along */
+		if (child_nodeid)
+			d_invalidate_removed(entry);
+		else
+			d_invalidate(entry);
+	}
 	fuse_invalidate_entry_cache(entry);
 
 	if (child_nodeid != 0 && d_really_is_positive(entry)) {
@@ -1635,7 +1641,8 @@ int fuse_reverse_inval_entry(struct fuse_conn *fc, u64 parent_nodeid,
 			err = -ENOENT;
 			goto badentry;
 		}
-		if (d_mountpoint(entry)) {
+		/* what's left sits on the root of a bind of the entry */
+		if (d_has_mounts(entry)) {
 			err = -EBUSY;
 			goto badentry;
 		}
