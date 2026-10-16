@@ -618,7 +618,7 @@ static void __simple_recursive_removal(struct dentry *dentry,
 			if (!locked || victim != dentry)
 				inode_lock_nested(inode, I_MUTEX_CHILD);
 			if (simple_positive(victim)) {
-				d_invalidate(victim);	// avoid lost mounts
+				d_invalidate_removed(victim);
 				if (callback)
 					callback(victim);
 				fsnotify_delete(inode, d_inode(victim), victim);
