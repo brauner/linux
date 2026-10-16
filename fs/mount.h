@@ -6,7 +6,6 @@
 #include <linux/fs_pin.h>
 
 extern struct file_system_type nullfs_fs_type;
-extern struct dentry *nullfs_new_file(struct super_block *sb);
 extern struct vfsmount *knullfs;
 extern struct list_head notify_list;
 
@@ -151,6 +150,10 @@ extern int __legitimize_mnt(struct vfsmount *, unsigned);
 static inline bool __path_is_mountpoint(const struct path *path)
 {
 	struct mount *m = __lookup_mnt(path->mnt, path->dentry);
+
+	/* a cover counts, nothing gets mounted or walked there */
+	if (IS_ERR(m))
+		return true;
 	return m && likely(!(m->mnt.mnt_flags & MNT_SYNC_UMOUNT));
 }
 

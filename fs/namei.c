@@ -1594,6 +1594,10 @@ static int __traverse_mounts(struct path *path, unsigned flags, bool *jumped,
 
 		if (flags & DCACHE_MOUNTED) {	// something's mounted on it..
 			struct vfsmount *mounted = lookup_mnt(path);
+			if (unlikely(IS_ERR(mounted))) {	// ... was, and is gone
+				ret = PTR_ERR(mounted);
+				break;
+			}
 			if (mounted) {		// ... in our namespace
 				dput(path->dentry);
 				if (need_mntput)
@@ -1652,6 +1656,8 @@ int follow_down_one(struct path *path)
 	struct vfsmount *mounted;
 
 	mounted = lookup_mnt(path);
+	if (IS_ERR(mounted))
+		return PTR_ERR(mounted);
 	if (mounted) {
 		dput(path->dentry);
 		mntput(path->mnt);
@@ -1706,6 +1712,9 @@ static bool __follow_mount_rcu(struct nameidata *nd, struct path *path)
 
 		if (flags & DCACHE_MOUNTED) {
 			struct mount *mounted = __lookup_mnt(path->mnt, dentry);
+			/* a cover fails the walk, the refwalk does that */
+			if (unlikely(IS_ERR(mounted)))
+				return false;
 			if (mounted) {
 				path->mnt = &mounted->mnt;
 				dentry = path->dentry = mounted->mnt.mnt_root;
@@ -3629,8 +3638,7 @@ int path_pts(struct path *path)
 
 	path->dentry = child;
 	dput(parent);
-	follow_down(path, 0);
-	return 0;
+	return follow_down(path, 0);
 }
 #endif
 
