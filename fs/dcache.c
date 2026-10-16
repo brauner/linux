@@ -1942,6 +1942,26 @@ void d_invalidate(struct dentry *dentry)
 EXPORT_SYMBOL(d_invalidate);
 
 /**
+ * d_invalidate_removed - invalidate a dentry whose object is gone for good
+ * @dentry: dentry to invalidate
+ *
+ * d_invalidate() for a name that the filesystem removed itself, outside
+ * of unlink(), rmdir() and rename(). Nothing brings the name back, so
+ * nothing gets mounted on it anymore and the mounts on it and below it
+ * are detached in every mount namespace and leave their covers behind,
+ * like vfs_unlink() does with dont_mount() and detach_mounts().
+ */
+void d_invalidate_removed(struct dentry *dentry)
+{
+	/* nothing gets mounted on a removed name, like vfs_unlink() does */
+	dont_mount(dentry);
+	d_invalidate(dentry);
+	if (dentry->d_inode)
+		__detach_mounts(dentry);
+}
+EXPORT_SYMBOL(d_invalidate_removed);
+
+/**
  * __d_alloc - allocate a dcache entry
  * @sb: filesystem it will belong to
  * @name: qstr of the name
