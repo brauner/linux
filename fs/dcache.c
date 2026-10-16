@@ -1416,37 +1416,27 @@ void shrink_dcache_sb(struct super_block *sb)
 EXPORT_SYMBOL(shrink_dcache_sb);
 
 /**
- * enum d_walk_ret - action to take during tree walk
- * @D_WALK_CONTINUE:	continue walk
- * @D_WALK_QUIT:	quit walk
- * @D_WALK_NORETRY:	quit when retry is needed
- * @D_WALK_SKIP:	skip this dentry and its children
- */
-enum d_walk_ret {
-	D_WALK_CONTINUE,
-	D_WALK_QUIT,
-	D_WALK_NORETRY,
-	D_WALK_SKIP,
-};
-
-/**
- * d_walk - walk the dentry tree
+ * __d_walk - walk the dentry tree
  * @parent:	start of walk
- * @data:	data passed to @enter() and @finish()
+ * @data:	data passed to @enter() callback
  * @enter:	callback when first entering the dentry
+ * @locked:	the caller holds rename_lock, see d_walk_mountpoints()
  *
  * The @enter() callbacks are called with d_lock held.
  */
-static void d_walk(struct dentry *parent, void *data,
-		   enum d_walk_ret (*enter)(void *, struct dentry *))
+static void __d_walk(struct dentry *parent, void *data,
+		     enum d_walk_ret (*enter)(void *, struct dentry *),
+		     bool locked)
 {
 	struct dentry *this_parent, *dentry;
-	unsigned seq = 0;
+	/* odd: no retries, see need_seqretry() */
+	unsigned seq = locked;
 	enum d_walk_ret ret;
 	bool retry = true;
 
 again:
-	read_seqbegin_or_lock(&rename_lock, &seq);
+	if (!locked)
+		read_seqbegin_or_lock(&rename_lock, &seq);
 	this_parent = parent;
 	spin_lock(&this_parent->d_lock);
 	if (unlikely(this_parent->d_flags & DCACHE_DENTRY_CURSOR))
@@ -1525,7 +1515,8 @@ ascend:
 
 out_unlock:
 	spin_unlock(&this_parent->d_lock);
-	done_seqretry(&rename_lock, seq);
+	if (!locked)
+		done_seqretry(&rename_lock, seq);
 	return;
 
 rename_retry:
@@ -1535,6 +1526,50 @@ rename_retry:
 		return;
 	seq = 1;
 	goto again;
+}
+
+static void d_walk(struct dentry *parent, void *data,
+		   enum d_walk_ret (*enter)(void *, struct dentry *))
+{
+	__d_walk(parent, data, enter, false);
+}
+
+struct mountpoint_walk {
+	void *data;
+	enum d_walk_ret (*enter)(void *, struct dentry *);
+};
+
+static enum d_walk_ret mountpoint_walk_enter(void *_data, struct dentry *dentry)
+{
+	struct mountpoint_walk *walk = _data;
+
+	if (!d_mountpoint(dentry))
+		return D_WALK_CONTINUE;
+	return walk->enter(walk->data, dentry);
+}
+
+/**
+ * d_walk_mountpoints - walk the mountpoints at or below a dentry
+ * @dentry:	start of walk
+ * @data:	data passed to @enter() callback
+ * @enter:	callback for every mountpoint, returns what d_walk()'s does
+ *
+ * rename_lock is held for the whole walk, so the parents @enter() sees
+ * are the ones the mountpoints have and nothing below @dentry becomes a
+ * mountpoint in the meantime, see d_set_mounted(). @enter() is called
+ * with d_lock held like d_walk()'s callback.
+ */
+void d_walk_mountpoints(struct dentry *dentry, void *data,
+			enum d_walk_ret (*enter)(void *, struct dentry *))
+{
+	struct mountpoint_walk walk = {
+		.data = data,
+		.enter = enter,
+	};
+
+	read_seqlock_excl(&rename_lock);
+	__d_walk(dentry, &walk, mountpoint_walk_enter, true);
+	read_sequnlock_excl(&rename_lock);
 }
 
 struct check_mount {
@@ -1548,8 +1583,6 @@ static enum d_walk_ret path_check_mount(void *data, struct dentry *dentry)
 	struct check_mount *info = data;
 	struct path path = { .mnt = info->mnt, .dentry = dentry };
 
-	if (likely(!d_mountpoint(dentry)))
-		return D_WALK_CONTINUE;
 	if (__path_is_mountpoint(&path)) {
 		info->mounted = 1;
 		return D_WALK_QUIT;
@@ -1570,7 +1603,7 @@ int path_has_submounts(const struct path *parent)
 	struct check_mount data = { .mnt = parent->mnt, .mounted = 0 };
 
 	guard(mount_locked_reader)();
-	d_walk(parent->dentry, &data, path_check_mount);
+	d_walk_mountpoints(parent->dentry, &data, path_check_mount);
 
 	return data.mounted;
 }
