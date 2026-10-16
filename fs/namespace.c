@@ -213,7 +213,9 @@ static inline struct hlist_head *mp_hash(struct dentry *dentry)
 /*
  * What an unmounted mount leaves behind at its unmounted parent instead of
  * staying attached to it. A lookup on the parent at the mountpoint finds
- * a stand-in for as long as the cover is there. The parent frees it.
+ * a stand-in for as long as the cover is there. The parent frees it, or
+ * the dentry of a removed name does when its last holder lets go, see
+ * mountpoint_dentry_killed().
  */
 struct mnt_cover {
 	struct hlist_node node;		/* parent->mnt_covers, RCU */
@@ -996,6 +998,7 @@ mountpoint:
 	/* Add the new mountpoint to the hash table */
 	read_seqlock_excl(&mount_lock);
 	mp->m_dentry = dget(dentry);
+	mp->m_holds_dentry = true;
 	hlist_add_head(&mp->m_hash, mp_hash(dentry));
 	INIT_HLIST_HEAD(&mp->m_list);
 	INIT_HLIST_HEAD(&mp->m_covers);
@@ -1006,20 +1009,73 @@ mountpoint:
 }
 
 /*
+ * A mountpoint holds its dentry for the mounts on it. Once only covers are
+ * left on a name the VFS removed, let go: nothing finds the dentry anymore,
+ * the covers only have to outlive the walkers that still hold it and they
+ * go with it, see mountpoint_dentry_killed(). Covers on a name that is still
+ * there keep the dentry, a lookup would make an uncovered one otherwise.
+ *
+ * locks: mount_lock[write_seqlock]
+ */
+static void release_mountpoint_dentry(struct mountpoint *mp, struct list_head *list)
+{
+	if (!mp->m_holds_dentry || !hlist_empty(&mp->m_list) ||
+	    !cant_mount(mp->m_dentry))
+		return;
+	mp->m_holds_dentry = false;
+	dput_to_list(mp->m_dentry, list);
+}
+
+/*
  * vfsmount lock must be held.  Additionally, the caller is responsible
  * for serializing calls for given disposal list.
  */
 static void maybe_free_mountpoint(struct mountpoint *mp, struct list_head *list)
 {
-	if (hlist_empty(&mp->m_list) && hlist_empty(&mp->m_covers)) {
-		struct dentry *dentry = mp->m_dentry;
-		spin_lock(&dentry->d_lock);
-		dentry->d_flags &= ~DCACHE_MOUNTED;
-		spin_unlock(&dentry->d_lock);
-		dput_to_list(dentry, list);
-		hlist_del(&mp->m_hash);
-		kfree(mp);
+	struct dentry *dentry = mp->m_dentry;
+
+	if (!hlist_empty(&mp->m_list))
+		return;
+	if (!hlist_empty(&mp->m_covers)) {
+		release_mountpoint_dentry(mp, list);
+		return;
 	}
+	spin_lock(&dentry->d_lock);
+	dentry->d_flags &= ~DCACHE_MOUNTED;
+	spin_unlock(&dentry->d_lock);
+	if (mp->m_holds_dentry)
+		dput_to_list(dentry, list);
+	hlist_del(&mp->m_hash);
+	kfree(mp);
+}
+
+/**
+ * mountpoint_dentry_killed - the dentry of a covers-only mountpoint is gone
+ * @dentry: what dentry_kill() is about to free
+ *
+ * The mountpoint of a removed name let go of its dentry once only covers
+ * were left on it, see release_mountpoint_dentry(). Nothing finds the
+ * dentry anymore and now nobody holds it: the covers that failed the
+ * walks to it and the mountpoint go with it.
+ */
+void mountpoint_dentry_killed(struct dentry *dentry)
+{
+	struct mnt_cover *cover;
+	struct hlist_node *n;
+	struct mountpoint *mp;
+
+	guard(mount_writer)();
+	mp = __lookup_mountpoint(dentry);
+	if (!mp)
+		return;
+	VFS_WARN_ON_ONCE(mp->m_holds_dentry || !hlist_empty(&mp->m_list));
+	hlist_for_each_entry_safe(cover, n, &mp->m_covers, pin) {
+		hlist_del_rcu(&cover->node);
+		hlist_del(&cover->pin);
+		kfree_rcu(cover, rcu);
+	}
+	hlist_del(&mp->m_hash);
+	kfree(mp);
 }
 
 /*
@@ -2138,6 +2194,8 @@ static void detach_unreachable_mounts(struct dentry *dentry)
  */
 void __detach_mounts(struct dentry *dentry)
 {
+	struct mountpoint *mp;
+
 	if (!d_mountpoint_below(dentry))
 		return;
 
@@ -2146,6 +2204,11 @@ void __detach_mounts(struct dentry *dentry)
 	/* the name goes first, what covered it goes second */
 	d_drop(dentry);
 	detach_unreachable_mounts(dentry);
+	/* the covers don't keep a removed dentry, see release_mountpoint_dentry() */
+	guard(mount_writer)();
+	mp = __lookup_mountpoint(dentry);
+	if (mp)
+		release_mountpoint_dentry(mp, &ex_mountpoints);
 }
 
 /*

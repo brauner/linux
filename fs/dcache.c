@@ -829,6 +829,9 @@ static struct dentry *dentry_kill(struct dentry *dentry)
 	this_cpu_dec(nr_dentry);
 	if (dentry->d_op && dentry->d_op->d_release)
 		dentry->d_op->d_release(dentry);
+	/* the covers of a removed name, see mountpoint_dentry_killed() */
+	if (unlikely(dentry->d_flags & DCACHE_MOUNTED))
+		mountpoint_dentry_killed(dentry);
 
 	cond_resched();
 	/* now that it's negative, ->d_parent is stable */

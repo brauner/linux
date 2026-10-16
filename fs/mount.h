@@ -42,6 +42,7 @@ struct mnt_pcp {
 struct mountpoint {
 	struct hlist_node m_hash;
 	struct dentry *m_dentry;
+	bool m_holds_dentry;		/* a reference on m_dentry, see release_mountpoint_dentry() */
 	struct hlist_head m_list;	/* mounts on it and pins */
 	struct hlist_head m_covers;	/* covers of unmounted parents */
 };
@@ -158,6 +159,7 @@ static inline bool __path_is_mountpoint(const struct path *path)
 }
 
 extern void __detach_mounts(struct dentry *dentry);
+extern void mountpoint_dentry_killed(struct dentry *dentry);
 
 static inline void detach_mounts(struct dentry *dentry)
 {
