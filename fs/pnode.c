@@ -431,7 +431,7 @@ static struct mount *next_candidate(struct mount *m, struct mount *victim)
 {
 	if (!receives_from(m, victim->mnt_parent))
 		return NULL;
-	return __lookup_mnt(&m->mnt, victim->mnt_mountpoint);
+	return __lookup_child(&m->mnt, victim->mnt_mountpoint);
 }
 
 /*
@@ -518,7 +518,7 @@ int propagate_mount_busy(struct mount *mnt, int refcnt)
 	/* the candidates are the mounts at @mp below the receivers */
 	for (m = propagation_next(parent, parent); m;
 	     m = propagation_next(m, parent)) {
-		struct mount *c = __lookup_mnt(&m->mnt, mp);
+		struct mount *c = __lookup_child(&m->mnt, mp);
 
 		/* each chain once, from its top: skip receivers that are candidates */
 		if (!c || (mnt_has_parent(m) && m->mnt_mountpoint == mp &&
@@ -544,7 +544,7 @@ void propagate_mount_unlock(struct mount *mnt)
 
 	for (m = propagation_next(parent, parent); m;
 			m = propagation_next(m, parent)) {
-		child = __lookup_mnt(&m->mnt, mnt->mnt_mountpoint);
+		child = __lookup_child(&m->mnt, mnt->mnt_mountpoint);
 		if (child)
 			child->mnt.mnt_flags &= ~MNT_LOCKED;
 	}
@@ -581,8 +581,8 @@ static void gather_candidates(struct list_head *set,
 		p = m->mnt_parent;
 		q = propagation_next(p, p);
 		while (q) {
-			struct mount *child = __lookup_mnt(&q->mnt,
-							   m->mnt_mountpoint);
+			struct mount *child = __lookup_child(&q->mnt,
+							     m->mnt_mountpoint);
 			if (child) {
 				/*
 				 * We might've already run into this one.  That

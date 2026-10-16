@@ -43,7 +43,7 @@ struct mountpoint {
 	struct hlist_node m_hash;
 	struct dentry *m_dentry;
 	struct hlist_head m_list;	/* mounts on it and pins */
-	struct hlist_head m_covers;	/* covers of unmounted parents */
+	struct hlist_head m_covers;	/* covers left behind on it */
 };
 
 struct mnt_cover;
@@ -144,6 +144,7 @@ static inline int is_mounted(struct vfsmount *mnt)
 }
 
 extern struct mount *__lookup_mnt(struct vfsmount *, struct dentry *);
+extern struct mount *__lookup_child(struct vfsmount *, struct dentry *);
 
 extern int __legitimize_mnt(struct vfsmount *, unsigned);
 
