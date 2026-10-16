@@ -213,7 +213,9 @@ static inline struct hlist_head *mp_hash(struct dentry *dentry)
 /*
  * What an unmounted mount leaves behind at its unmounted parent instead of
  * staying attached to it. A lookup on the parent at the mountpoint finds
- * a stand-in for as long as the cover is there. The parent frees it.
+ * a stand-in for as long as the cover is there. The parent frees it, or
+ * the dentry of a removed name does when its last holder lets go, see
+ * mountpoint_dentry_killed().
  */
 struct mnt_cover {
 	struct hlist_node node;		/* parent->mnt_covers, RCU */
@@ -1006,20 +1008,74 @@ mountpoint:
 }
 
 /*
- * vfsmount lock must be held.  Additionally, the caller is responsible
- * for serializing calls for given disposal list.
+ * Nothing is left on @mp.
+ *
+ * locks: mount_lock[write_seqlock], the caller serializes calls for @list
+ */
+static void free_mountpoint(struct mountpoint *mp, struct list_head *list)
+{
+	struct dentry *dentry = mp->m_dentry;
+
+	spin_lock(&dentry->d_lock);
+	dentry->d_flags &= ~DCACHE_MOUNTED;
+	spin_unlock(&dentry->d_lock);
+	/* a removed name let go of its dentry already, see maybe_free_mountpoint() */
+	if (!cant_mount(dentry))
+		dput_to_list(dentry, list);
+	hlist_del(&mp->m_hash);
+	kfree(mp);
+}
+
+/*
+ * A mount or a pin left @mp. A mountpoint holds its dentry for the mounts
+ * on it and for the covers on a name that is still there, a lookup would
+ * make an uncovered dentry otherwise. Once only covers are left on a name
+ * the VFS removed it lets go: nothing finds the dentry anymore, the covers
+ * only have to outlive the walkers that still hold it and they go with it,
+ * see mountpoint_dentry_killed(). That is here, when the last mount leaves
+ * a removed name, or in __detach_mounts() when a name without mounts is
+ * removed. IOW, a mountpoint holds its dentry iff it has mounts or the
+ * name is still there, and a removed name doesn't get mounts again.
+ *
+ * locks: mount_lock[write_seqlock], the caller serializes calls for @list
  */
 static void maybe_free_mountpoint(struct mountpoint *mp, struct list_head *list)
 {
-	if (hlist_empty(&mp->m_list) && hlist_empty(&mp->m_covers)) {
-		struct dentry *dentry = mp->m_dentry;
-		spin_lock(&dentry->d_lock);
-		dentry->d_flags &= ~DCACHE_MOUNTED;
-		spin_unlock(&dentry->d_lock);
-		dput_to_list(dentry, list);
-		hlist_del(&mp->m_hash);
-		kfree(mp);
+	if (!hlist_empty(&mp->m_list))
+		return;
+	if (cant_mount(mp->m_dentry))
+		dput_to_list(mp->m_dentry, list);
+	if (hlist_empty(&mp->m_covers))
+		free_mountpoint(mp, list);
+}
+
+/**
+ * mountpoint_dentry_killed - the dentry of a covers-only mountpoint is gone
+ * @dentry: what dentry_kill() is about to free
+ *
+ * The mountpoint of a removed name let go of its dentry once only covers
+ * were left on it, see maybe_free_mountpoint(). Nothing finds the
+ * dentry anymore and now nobody holds it: the covers that failed the
+ * walks to it and the mountpoint go with it.
+ */
+void mountpoint_dentry_killed(struct dentry *dentry)
+{
+	struct mnt_cover *cover;
+	struct hlist_node *n;
+	struct mountpoint *mp;
+
+	guard(mount_writer)();
+	mp = __lookup_mountpoint(dentry);
+	if (!mp)
+		return;
+	VFS_WARN_ON_ONCE(!cant_mount(dentry) || !hlist_empty(&mp->m_list));
+	hlist_for_each_entry_safe(cover, n, &mp->m_covers, pin) {
+		hlist_del_rcu(&cover->node);
+		hlist_del(&cover->pin);
+		kfree_rcu(cover, rcu);
 	}
+	hlist_del(&mp->m_hash);
+	kfree(mp);
 }
 
 /*
@@ -1124,7 +1180,9 @@ static void drop_cover(struct mnt_cover *cover, struct list_head *shrink_list)
 {
 	hlist_del_rcu(&cover->node);
 	hlist_del(&cover->pin);
-	maybe_free_mountpoint(cover->mp, shrink_list);
+	/* the hold on the dentry doesn't depend on the covers */
+	if (hlist_empty(&cover->mp->m_list) && hlist_empty(&cover->mp->m_covers))
+		free_mountpoint(cover->mp, shrink_list);
 	kfree_rcu(cover, rcu);
 }
 
@@ -2136,10 +2194,22 @@ static void detach_unreachable_mounts(struct dentry *dentry)
  */
 void __detach_mounts(struct dentry *dentry)
 {
+	struct mountpoint *mp;
+
 	guard(namespace_excl)();
 
 	/* the name goes first, what covered it goes second */
 	d_drop(dentry);
+	/*
+	 * A removed name with nothing but covers on it lets go of its dentry
+	 * now. One with mounts does when the last of them leaves, in the
+	 * detach below or in an umount later, see maybe_free_mountpoint().
+	 */
+	scoped_guard(mount_writer) {
+		mp = __lookup_mountpoint(dentry);
+		if (mp && hlist_empty(&mp->m_list))
+			dput_to_list(dentry, &ex_mountpoints);
+	}
 	detach_unreachable_mounts(dentry);
 }
 

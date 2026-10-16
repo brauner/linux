@@ -158,6 +158,7 @@ static inline bool __path_is_mountpoint(const struct path *path)
 }
 
 extern void __detach_mounts(struct dentry *dentry);
+extern void mountpoint_dentry_killed(struct dentry *dentry);
 
 static inline void detach_mounts(struct dentry *dentry)
 {

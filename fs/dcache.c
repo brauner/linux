@@ -829,6 +829,9 @@ static struct dentry *dentry_kill(struct dentry *dentry)
 	this_cpu_dec(nr_dentry);
 	if (dentry->d_op && dentry->d_op->d_release)
 		dentry->d_op->d_release(dentry);
+	/* the covers of a removed name, see mountpoint_dentry_killed() */
+	if (unlikely(dentry->d_flags & DCACHE_MOUNTED))
+		mountpoint_dentry_killed(dentry);
 
 	cond_resched();
 	/* now that it's negative, ->d_parent is stable */
@@ -2736,7 +2739,9 @@ void d_delete(struct dentry * dentry)
 	if (dentry->d_lockref.count == 1) {
 		if (dentry_negative_policy)
 			__d_drop(dentry);
-		dentry->d_flags &= ~DCACHE_CANT_MOUNT;
+		/* a removed name with covers on it stays one, see free_mountpoint() */
+		if (!d_mountpoint(dentry))
+			dentry->d_flags &= ~DCACHE_CANT_MOUNT;
 		dentry_unlink_inode(dentry);
 	} else {
 		__d_drop(dentry);
