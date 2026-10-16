@@ -2048,6 +2048,9 @@ void __detach_mounts(struct dentry *dentry)
 	struct hlist_node *n;
 	struct mount *mnt;
 
+	if (!d_mountpoint(dentry))
+		return;
+
 	guard(namespace_excl)();
 	guard(mount_writer)();
 
