@@ -1630,8 +1630,9 @@ EXPORT_SYMBOL(path_has_submounts);
  * reachable (e.g. NFS can unhash a directory dentry and then the complete
  * subtree can become unreachable).
  *
- * Only one of d_invalidate() and d_set_mounted() must succeed.  For
- * this reason take rename_lock and d_lock on dentry and ancestors.
+ * No dentry below one that d_invalidate() unhashed becomes a mountpoint.
+ * For this reason take rename_lock and d_lock on dentry and ancestors.
+ * One that got there first stays a mountpoint like the others below it.
  * Likewise for dont_mount() which marks a dentry that is being removed
  * under d_lock.
  */
@@ -1896,23 +1897,16 @@ void shrink_dcache_for_umount(struct super_block *sb)
 	}
 }
 
-static enum d_walk_ret find_submount(void *_data, struct dentry *dentry)
-{
-	struct dentry **victim = _data;
-	if (d_mountpoint(dentry)) {
-		*victim = dget_dlock(dentry);
-		return D_WALK_QUIT;
-	}
-	return D_WALK_CONTINUE;
-}
-
 /**
- * d_invalidate - detach submounts, prune dcache, and drop
- * @dentry: dentry to invalidate (aka detach, prune and drop)
+ * d_invalidate - prune dcache and drop
+ * @dentry: dentry to invalidate (aka prune and drop)
+ *
+ * The mounts on @dentry and below it stay where they are. A directory
+ * that a lookup finds again is moved back into place by d_splice_alias()
+ * and they come back with it.
  */
 void d_invalidate(struct dentry *dentry)
 {
-	bool had_submounts = false;
 	spin_lock(&dentry->d_lock);
 	if (d_unhashed(dentry)) {
 		spin_unlock(&dentry->d_lock);
@@ -1926,18 +1920,6 @@ void d_invalidate(struct dentry *dentry)
 		return;
 
 	shrink_dcache_parent(dentry);
-	for (;;) {
-		struct dentry *victim = NULL;
-		d_walk(dentry, &victim, find_submount);
-		if (!victim) {
-			if (had_submounts)
-				shrink_dcache_parent(dentry);
-			return;
-		}
-		had_submounts = true;
-		detach_mounts(victim);
-		dput(victim);
-	}
 }
 EXPORT_SYMBOL(d_invalidate);
 

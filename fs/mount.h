@@ -161,7 +161,7 @@ extern void __detach_mounts(struct dentry *dentry);
 
 static inline void detach_mounts(struct dentry *dentry)
 {
-	if (!d_mountpoint(dentry))
+	if (!d_mountpoint_below(dentry))
 		return;
 	__detach_mounts(dentry);
 }

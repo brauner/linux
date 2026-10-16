@@ -2057,6 +2057,57 @@ out:
 }
 
 /*
+ * d_walk_mountpoints() hands us every mountpoint at or below the dentry
+ * under rename_lock and the mountpoint's d_lock, we hold mount_lock. The
+ * mounts on it are collected for umount_tree(): their parents reach them
+ * through the name of the dentry and that is gone.
+ */
+static enum d_walk_ret collect_unreachable(void *data, struct dentry *mountpoint)
+{
+	struct list_head *unreachable = data;
+	struct mountpoint *mp = __lookup_mountpoint(mountpoint);
+	struct mount *m;
+
+	if (!mp)
+		return D_WALK_CONTINUE;
+	/* nothing pins a mountpoint without namespace_sem, so these are all mounts */
+	hlist_for_each_entry(m, &mp->m_list, mnt_mp_list) {
+		/* mnt_list is free until umount_tree() gathers the mount */
+		list_add(&m->mnt_list, unreachable);
+	}
+	return D_WALK_CONTINUE;
+}
+
+/*
+ * Detach the mounts on @dentry and below it and leave their covers
+ * behind. One walk collects them. A mount below another one goes with
+ * it, so the tree of each one is taken off the list before umount_tree()
+ * gathers it on its own.
+ *
+ * locks: namespace_sem[excl]
+ */
+static void detach_unreachable_mounts(struct dentry *dentry)
+{
+	LIST_HEAD(unreachable);
+	struct mount *mnt, *p;
+
+	/* the walk only reads, lockless walkers don't have to wait for it */
+	scoped_guard(mount_locked_reader)
+		d_walk_mountpoints(dentry, &unreachable, collect_unreachable);
+	if (list_empty(&unreachable))
+		return;
+
+	guard(mount_writer)();
+	while (!list_empty(&unreachable)) {
+		mnt = list_first_entry(&unreachable, struct mount, mnt_list);
+		for (p = mnt; p; p = next_mnt(p, mnt))
+			list_del_init(&p->mnt_list);
+		event++;
+		umount_tree(mnt, UMOUNT_COVER);
+	}
+}
+
+/*
  * __detach_mounts - lazily unmount all mounts on the specified dentry
  *
  * During unlink, rmdir, and d_drop it is possible to loose the path
@@ -2067,35 +2118,21 @@ out:
  * The dentry is unhashed before the mounts go so that no lookup finds
  * what they covered. The caller removes it for good afterwards.
  *
+ * The mounts below @dentry go the same way, nobody reaches them by name
+ * anymore either.
+ *
  * The caller may hold dentry->d_inode->i_rwsem.
  */
 void __detach_mounts(struct dentry *dentry)
 {
-	struct pinned_mountpoint mp = {};
-	struct mnt_cover *cover;
-	struct hlist_node *n;
-	struct mount *mnt;
-
-	if (!d_mountpoint(dentry))
+	if (!d_mountpoint_below(dentry))
 		return;
 
 	guard(namespace_excl)();
-	guard(mount_writer)();
-
-	if (!lookup_mountpoint(dentry, &mp))
-		return;
 
 	/* the name goes first, what covered it goes second */
 	d_drop(dentry);
-	event++;
-	while (mp.node.next) {
-		mnt = hlist_entry(mp.node.next, struct mount, mnt_mp_list);
-		umount_tree(mnt, UMOUNT_COVER);
-	}
-	/* the dentry goes away, so do the covers left behind on it */
-	hlist_for_each_entry_safe(cover, n, &mp.mp->m_covers, pin)
-		drop_cover(cover, &ex_mountpoints);
-	unpin_mountpoint(&mp);
+	detach_unreachable_mounts(dentry);
 }
 
 /*
