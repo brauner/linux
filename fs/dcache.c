@@ -3280,6 +3280,28 @@ out_err:
 	return ret;
 }
 
+/*
+ * Would moving the directory @alias to the name of @dentry take mounts
+ * along? Moving it back to the name it had is fine, those mounts were
+ * there. A mount below a bind of something inside @alias doesn't count
+ * either, see mounts_follow(). A removed name whose mounts left their
+ * trap behind doesn't move at all, the trap would fail every walk to
+ * the new name.
+ */
+static bool d_unalias_moves_mounts(struct dentry *alias, struct dentry *dentry)
+{
+	struct dentry *parent = dentry->d_parent;
+	bool same, trapped;
+
+	spin_lock(&alias->d_lock);
+	trapped = cant_mount(alias) && d_mountpoint(alias);
+	same = alias->d_parent == parent &&
+	       alias->d_name.hash == dentry->d_name.hash &&
+	       d_same_name(alias, parent, &dentry->d_name);
+	spin_unlock(&alias->d_lock);
+	return trapped || (!same && mounts_follow(alias));
+}
+
 struct dentry *d_splice_alias_ops(struct inode *inode, struct dentry *dentry,
 				  const struct dentry_operations *ops)
 {
@@ -3298,6 +3320,13 @@ struct dentry *d_splice_alias_ops(struct inode *inode, struct dentry *dentry,
 		if (unlikely(new)) {
 			/* The reference to new ensures it remains an alias */
 			spin_unlock(&inode->i_lock);
+			/* don't carry mounts to a name they never covered */
+			if (unlikely(!IS_ROOT(new) &&
+				     d_unalias_moves_mounts(new, dentry))) {
+				dput(new);
+				iput(inode);
+				return ERR_PTR(-EBUSY);
+			}
 			write_seqlock(&rename_lock);
 			if (unlikely(d_ancestor(new, dentry))) {
 				write_sequnlock(&rename_lock);
