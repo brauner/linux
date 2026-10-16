@@ -223,6 +223,21 @@ bool sync_lazytime(struct inode *inode);
 /*
  * dcache.c
  */
+/**
+ * enum d_walk_ret - action to take during tree walk
+ * @D_WALK_CONTINUE:	continue walk
+ * @D_WALK_QUIT:	quit walk
+ * @D_WALK_NORETRY:	quit when retry is needed
+ * @D_WALK_SKIP:	skip this dentry and its children
+ */
+enum d_walk_ret {
+	D_WALK_CONTINUE,
+	D_WALK_QUIT,
+	D_WALK_NORETRY,
+	D_WALK_SKIP,
+};
+extern bool d_walk_mountpoints(struct dentry *dentry, void *data,
+			       enum d_walk_ret (*enter)(void *, struct dentry *));
 extern int d_set_mounted(struct dentry *dentry);
 extern long prune_dcache_sb(struct super_block *sb, struct shrink_control *sc);
 extern struct dentry *d_alloc_cursor(struct dentry *);

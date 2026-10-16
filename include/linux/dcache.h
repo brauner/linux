@@ -236,7 +236,8 @@ enum dentry_flags {
 	DCACHE_PAR_LOOKUP		= BIT(24),	/* being looked up (with parent locked shared) */
 	DCACHE_DENTRY_CURSOR		= BIT(25),
 	DCACHE_NORCU			= BIT(26),	/* No RCU delay for freeing */
-	DCACHE_PERSISTENT		= BIT(27)
+	DCACHE_PERSISTENT		= BIT(27),
+	DCACHE_MOUNTED_BELOW		= BIT(28),	/* a mountpoint may be below, see d_set_mounted() */
 };
 
 #define DCACHE_MANAGED_DENTRY \
@@ -436,6 +437,17 @@ static inline bool d_managed(const struct dentry *dentry)
 static inline bool d_mountpoint(const struct dentry *dentry)
 {
 	return dentry->d_flags & DCACHE_MOUNTED;
+}
+
+/*
+ * Can a mountpoint be at or below @dentry? A hint: d_set_mounted() marks
+ * the directories above a new mountpoint, a move marks the directories
+ * the dentry moves under, and a walk over the mountpoints below that
+ * finds none clears it again.
+ */
+static inline bool d_mountpoint_below(const struct dentry *dentry)
+{
+	return dentry->d_flags & (DCACHE_MOUNTED | DCACHE_MOUNTED_BELOW);
 }
 
 /*
