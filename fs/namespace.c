@@ -2057,10 +2057,20 @@ out:
 }
 
 /*
+ * A mount on the root of its parent isn't reached through the name of
+ * its mountpoint, the parent reaches it by crossing onto itself.
+ */
+static bool reached_by_name(struct mount *m)
+{
+	return m->mnt_mountpoint != m->mnt_parent->mnt.mnt_root;
+}
+
+/*
  * d_walk_mountpoints() hands us every mountpoint at or below the dentry
  * under rename_lock and the mountpoint's d_lock, we hold mount_lock. The
  * mounts on it are collected for umount_tree(): their parents reach them
- * through the name of the dentry and that is gone.
+ * through the name of the dentry and that is gone. A mount on the root
+ * of its parent stays, the parent reaches it by crossing onto itself.
  */
 static enum d_walk_ret collect_unreachable(void *data, struct dentry *mountpoint)
 {
@@ -2072,6 +2082,8 @@ static enum d_walk_ret collect_unreachable(void *data, struct dentry *mountpoint
 		return D_WALK_CONTINUE;
 	/* nothing pins a mountpoint without namespace_sem, so these are all mounts */
 	hlist_for_each_entry(m, &mp->m_list, mnt_mp_list) {
+		if (!reached_by_name(m))
+			continue;
 		/* mnt_list is free until umount_tree() gathers the mount */
 		list_add(&m->mnt_list, unreachable);
 	}
@@ -2119,7 +2131,8 @@ static void detach_unreachable_mounts(struct dentry *dentry)
  * what they covered. The caller removes it for good afterwards.
  *
  * The mounts below @dentry go the same way, nobody reaches them by name
- * anymore either.
+ * anymore either. A mount on the root of its parent is reached by
+ * crossing onto the parent and stays.
  *
  * The caller may hold dentry->d_inode->i_rwsem.
  */
