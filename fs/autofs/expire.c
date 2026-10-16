@@ -37,7 +37,7 @@ static int autofs_mount_busy(struct vfsmount *mnt,
 
 	path_get(&path);
 
-	if (!follow_down_one(&path))
+	if (follow_down_one(&path) <= 0)
 		goto done;
 
 	if (is_autofs_dentry(path.dentry)) {

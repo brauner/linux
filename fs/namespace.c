@@ -81,7 +81,6 @@ static struct hlist_head *mount_hashtable __ro_after_init;
 static struct hlist_head *mountpoint_hashtable __ro_after_init;
 static struct kmem_cache *mnt_cache __ro_after_init;
 struct vfsmount *knullfs __ro_after_init;	/* private nullfs instance */
-static struct vfsmount *knullfs_file __ro_after_init;	/* its regular file */
 static DECLARE_RWSEM(namespace_sem);
 static HLIST_HEAD(unmounted);	/* protected by namespace_sem */
 static LIST_HEAD(ex_mountpoints); /* protected by namespace_sem */
@@ -821,13 +820,14 @@ static bool legitimize_mnt(struct vfsmount *bastard, unsigned seq)
  *
  * If @mnt has a child mount @c mounted on @dentry find and return it.
  * If @mnt is unmounted and a child that was unmounted with it left its
- * cover behind at @dentry, return the stand-in for it instead: knullfs
- * for a directory, its regular file for anything else.
+ * cover behind at @dentry, return %-ENOENT instead: the mount the walk
+ * would have crossed onto is gone and nothing takes its place.
  * Caller must either hold the spinlock component of @mount_lock or
  * hold rcu_read_lock(), sample the seqcount component before the call
  * and recheck it afterwards.
  *
- * Return: The child of @mnt mounted on @dentry, a stand-in or %NULL.
+ * Return: The child of @mnt mounted on @dentry, %NULL or an ERR_PTR
+ * for a cover.
  */
 struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 {
@@ -843,7 +843,7 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 	if (unlikely(data_race(mnt->mnt_flags) & MNT_UMOUNT)) {
 		hlist_for_each_entry_rcu(cover, &real_mount(mnt)->mnt_covers, node)
 			if (cover->dentry == dentry)
-				return real_mount(d_is_dir(dentry) ? knullfs : knullfs_file);
+				return ERR_PTR(-ENOENT);
 	}
 	return NULL;
 }
@@ -852,8 +852,9 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
  * lookup_mnt - Return the child mount mounted at given location
  * @path:	location in the namespace
  *
- * Acquires and returns a new reference to mount at given location
- * or %NULL if nothing is mounted there.
+ * Acquires and returns a new reference to mount at given location,
+ * %NULL if nothing is mounted there or an ERR_PTR if a mount was and
+ * left its cover, see __lookup_mnt().
  */
 struct vfsmount *lookup_mnt(const struct path *path)
 {
@@ -862,11 +863,20 @@ struct vfsmount *lookup_mnt(const struct path *path)
 	unsigned seq;
 
 	rcu_read_lock();
-	do {
+	for (;;) {
 		seq = read_seqbegin(&mount_lock);
 		child_mnt = __lookup_mnt(path->mnt, path->dentry);
+		if (unlikely(IS_ERR(child_mnt))) {
+			/* a cover, nothing to pin: the lookup has to hold */
+			m = ERR_CAST(child_mnt);
+			if (!read_seqretry(&mount_lock, seq))
+				break;
+			continue;
+		}
 		m = child_mnt ? &child_mnt->mnt : NULL;
-	} while (!legitimize_mnt(m, seq));
+		if (legitimize_mnt(m, seq))
+			break;
+	}
 	rcu_read_unlock();
 	return m;
 }
@@ -2792,6 +2802,9 @@ static inline struct mount *where_to_mount(const struct path *path,
 		return m->mnt_parent;
 	}
 	m = __lookup_mnt(path->mnt, path->dentry);
+	/* a cover: nothing gets mounted there */
+	if (unlikely(IS_ERR(m)))
+		return m;
 	if (unlikely(m)) {
 		m = topmost_overmount(m);
 		*dentry = m->mnt.mnt_root;
@@ -2849,6 +2862,10 @@ static void do_lock_mount(const struct path *path,
 
 		scoped_guard(mount_locked_reader) {
 			m = where_to_mount(path, &dentry, beneath);
+			if (unlikely(IS_ERR(m))) {
+				res->parent = m;
+				return;
+			}
 			/* sticky, so it takes no locks to refuse it */
 			if (unlikely(cant_mount(dentry))) {
 				res->parent = ERR_PTR(-ENOENT);
@@ -2867,7 +2884,9 @@ static void do_lock_mount(const struct path *path,
 		scoped_guard(mount_locked_reader)
 			n = where_to_mount(path, &d, beneath);
 
-		if (unlikely(n != m || dentry != d))
+		if (unlikely(IS_ERR(n)))
+			err = PTR_ERR(n);	// a cover appeared
+		else if (unlikely(n != m || dentry != d))
 			err = -EAGAIN;		// something moved, retry
 		else if (unlikely(cant_mount(dentry) || !is_mounted(path->mnt)))
 			err = -ENOENT;		// not to be mounted on
@@ -3612,7 +3631,8 @@ static int do_set_group(const struct path *from_path, const struct path *to_path
  * @path: path to check
  *
  * Check if path is overmounted, i.e., if there's a mount on top of
- * @path->mnt with @path->dentry as mountpoint.
+ * @path->mnt with @path->dentry as mountpoint. A cover left there
+ * counts, nothing gets mounted on it either.
  *
  * Context: namespace_sem must be held at least shared.
  * MUST NOT be called under lock_mount_hash() (there one should just
@@ -6375,25 +6395,6 @@ static void __init mount_rootfs_on_nullfs(struct vfsmount *mnt,
 		attach_mnt(real_mount(mnt), mp.parent, mp.mp);
 }
 
-static struct vfsmount *__init knullfs_file_mount(void)
-{
-	struct dentry *file;
-	struct mount *mnt;
-
-	file = nullfs_new_file(knullfs->mnt_sb);
-	if (IS_ERR(file))
-		return ERR_CAST(file);
-	mnt = clone_mnt(real_mount(knullfs), file, CL_PRIVATE);
-	dput(file);
-	if (IS_ERR(mnt))
-		return ERR_CAST(mnt);
-	mnt->mnt_ns = MNT_NS_INTERNAL;
-	mnt->mnt.mnt_flags |= MNT_INTERNAL;
-	mnt->mnt.mnt_flags &= ~MNT_READONLY;
-	dont_mount(mnt->mnt.mnt_root);
-	return &mnt->mnt;
-}
-
 static void __init init_mount_tree(void)
 {
 	struct vfsmount *mnt, *nullfs_mnt;
@@ -6406,13 +6407,9 @@ static void __init init_mount_tree(void)
 	 * (1) nullfs with mount id 1
 	 * (2) mutable rootfs with mount id 2
 	 * (3) private nullfs for kthreads (SB_KERNMOUNT), kept in knullfs
-	 * (4) a second mount of (3) rooted on a regular file, kept in
-	 *     knullfs_file
 	 *
 	 * with (2) mounted on top of (1). The init_task's root and pwd
 	 * are pointed at (3) so all kthreads start isolated in nullfs.
-	 * A lookup at the cover an unmounted mount left behind finds (3)
-	 * or (4), see __lookup_mnt().
 	 */
 	nullfs_mnt = vfs_kern_mount(&nullfs_fs_type, 0, "nullfs", NULL);
 	if (IS_ERR(nullfs_mnt))
@@ -6451,9 +6448,6 @@ static void __init init_mount_tree(void)
 	dont_mount(knullfs->mnt_root);
 	/* and nothing is ever written through it */
 	knullfs->mnt_flags |= MNT_READONLY;
-	knullfs_file = knullfs_file_mount();
-	if (IS_ERR(knullfs_file))
-		panic("VFS: Failed to create the nullfs file stand-in");
 	root.mnt	= knullfs;
 	root.dentry	= knullfs->mnt_root;
 
