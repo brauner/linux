@@ -660,6 +660,44 @@ TEST_F(unlink_reval, renamed_dir_keeps_its_mounts)
 	close(fd);
 }
 
+/*
+ * The server renames d to e behind our back: it answers the revalidation
+ * of d with ENOENT and hands out d's node for e, no rename goes through
+ * the mount. The directory would come back under a name its mounts never
+ * covered, so the lookup of e is refused while the mark is below d. Once
+ * the server calls it d again, d/f is back with the mark.
+ */
+TEST_F(unlink_reval, server_renamed_dir_is_busy)
+{
+	char buf[16] = {};
+	struct stat st;
+	int fd;
+
+	ASSERT_EQ(0, stat(fmnt, &st));
+	self->tfd = syscall(SYS_open_tree, AT_FDCWD, fmnt, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
+	ASSERT_GE(self->tfd, 0);
+	ASSERT_EQ(0, fstatat(self->tfd, "d/f", &st, 0));
+	ASSERT_EQ(0, cover(self->tfd, "d/f"));
+
+	atomic_store(&d_is_e, 1);
+	EXPECT_EQ(-1, fstatat(self->tfd, "d/f", &st, 0));
+	EXPECT_EQ(ENOENT, errno);
+	fd = openat(self->tfd, "e/f", O_RDONLY | O_CLOEXEC);
+	EXPECT_EQ(-1, fd) {
+		TH_LOG("e/f opened although the mark would have moved along");
+	}
+	EXPECT_EQ(EBUSY, errno);
+	if (fd >= 0)
+		close(fd);
+
+	atomic_store(&d_is_e, 0);
+	fd = openat(self->tfd, "d/f", O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	ASSERT_GT(read(fd, buf, sizeof(buf) - 1), 0);
+	EXPECT_STREQ(MARK, buf);
+	close(fd);
+}
+
 /* The same without mounts: nothing to reveal, but it must end as well. */
 TEST_F(unlink_reval, plain_name_keeps_going)
 {
