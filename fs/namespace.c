@@ -2241,6 +2241,44 @@ void __detach_mounts(struct dentry *dentry)
 		release_mountpoint_dentry(mp, &ex_mountpoints);
 }
 
+/* collect_unreachable() without the collecting, see mounts_follow() */
+static enum d_walk_ret find_unreachable(void *data, struct dentry *mountpoint)
+{
+	struct mountpoint *mp = __lookup_mountpoint(mountpoint);
+	bool *found = data;
+	struct mount *m;
+
+	if (!mp)
+		return D_WALK_CONTINUE;
+	hlist_for_each_entry(m, &mp->m_list, mnt_mp_list) {
+		if (!reached_by_name(m))
+			continue;
+		*found = true;
+		return D_WALK_QUIT;
+	}
+	return D_WALK_CONTINUE;
+}
+
+/**
+ * mounts_follow - would mounts follow @dentry to another name?
+ * @dentry: directory that is about to get another name
+ *
+ * True if a mount on @dentry or below it is reached through @dentry,
+ * i.e. through a name below the root of its parent. A mount on the root
+ * of a bind of something inside @dentry is reached by crossing onto that
+ * bind and stays where it is whatever @dentry is called, so it doesn't
+ * count. Those are the mounts __detach_mounts() would detach.
+ */
+bool mounts_follow(struct dentry *dentry)
+{
+	bool found = false;
+
+	guard(namespace_shared)();
+	guard(mount_locked_reader)();
+	d_walk_mountpoints(dentry, &found, find_unreachable);
+	return found;
+}
+
 /*
  * Is the caller allowed to modify his namespace?
  */
