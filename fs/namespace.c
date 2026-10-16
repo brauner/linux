@@ -211,11 +211,12 @@ static inline struct hlist_head *mp_hash(struct dentry *dentry)
 }
 
 /*
- * What an unmounted mount leaves behind at its unmounted parent instead of
- * staying attached to it. A lookup on the parent at the mountpoint finds
- * a stand-in for as long as the cover is there. The parent frees it, or
- * the dentry of a removed name does when its last holder lets go, see
- * mountpoint_dentry_killed().
+ * What an unmounted mount leaves behind at its parent: at an unmounted
+ * parent instead of staying attached to it and at any parent when the
+ * name it was mounted on went away. A lookup on the parent at the
+ * mountpoint fails for as long as the cover is there. The parent frees
+ * it, or the dentry of a removed name does when its last holder lets go,
+ * see mountpoint_dentry_killed().
  */
 struct mnt_cover {
 	struct hlist_node node;		/* parent->mnt_covers, RCU */
@@ -816,14 +817,37 @@ static bool legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 }
 
 /**
+ * __lookup_child - mount hash lookup
+ * @mnt:	parent mount
+ * @dentry:	dentry of mountpoint
+ *
+ * If @mnt has a child mount @c mounted on @dentry find and return it.
+ * Unlike __lookup_mnt() this never fails for a cover. Code that changes
+ * the mount tree must only find mounts that are part of it.
+ * Same locking as __lookup_mnt().
+ *
+ * Return: The child of @mnt mounted on @dentry or %NULL.
+ */
+struct mount *__lookup_child(struct vfsmount *mnt, struct dentry *dentry)
+{
+	struct hlist_head *head = m_hash(mnt, dentry);
+	struct mount *p;
+
+	hlist_for_each_entry_rcu(p, head, mnt_hash)
+		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
+			return p;
+	return NULL;
+}
+
+/**
  * __lookup_mnt - mount hash lookup
  * @mnt:	parent mount
  * @dentry:	dentry of mountpoint
  *
  * If @mnt has a child mount @c mounted on @dentry find and return it.
- * If @mnt is unmounted and a child that was unmounted with it left its
- * cover behind at @dentry, return %-ENOENT instead: the mount the walk
- * would have crossed onto is gone and nothing takes its place.
+ * If a child that was unmounted left its cover behind on @mnt at
+ * @dentry, return %-ENOENT instead: the mount the walk would have
+ * crossed onto is gone and nothing takes its place.
  * Caller must either hold the spinlock component of @mount_lock or
  * hold rcu_read_lock(), sample the seqcount component before the call
  * and recheck it afterwards.
@@ -833,17 +857,16 @@ static bool legitimize_mnt(struct vfsmount *bastard, unsigned seq)
  */
 struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
 {
-	struct hlist_head *head = m_hash(mnt, dentry);
+	struct hlist_head *covers = &real_mount(mnt)->mnt_covers;
 	struct mnt_cover *cover;
 	struct mount *p;
 
-	hlist_for_each_entry_rcu(p, head, mnt_hash)
-		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
-			return p;
-	/* an unmounted mount keeps the covers its unmounted children left */
-	/* a lockless caller rechecks mount_lock after a miss, a stale flag is harmless */
-	if (unlikely(data_race(mnt->mnt_flags) & MNT_UMOUNT)) {
-		hlist_for_each_entry_rcu(cover, &real_mount(mnt)->mnt_covers, node)
+	p = __lookup_child(mnt, dentry);
+	if (p)
+		return p;
+	/* a lockless caller rechecks mount_lock after a miss */
+	if (unlikely(!hlist_empty(covers))) {
+		hlist_for_each_entry_rcu(cover, covers, node)
 			if (cover->dentry == dentry)
 				return ERR_PTR(-ENOENT);
 	}
@@ -1156,8 +1179,9 @@ static void umount_mnt(struct mount *mnt)
 
 /*
  * @mnt is unmounted together with its parent and would have stayed attached
- * to it. Leave its cover behind before it is detached so that a lookup on the
- * parent at the mountpoint keeps finding a mount instead of what @mnt covered.
+ * to it or the name it is mounted on went away. Leave its cover behind before
+ * it is detached so that a lookup on the parent at the mountpoint keeps
+ * failing instead of finding what @mnt covered.
  *
  * locks: mount_lock[write_seqlock]
  */
@@ -1913,9 +1937,12 @@ static bool needs_cover(struct mount *mnt, enum umount_tree_flags how)
 {
 	if (how & UMOUNT_SYNC)
 		return false;
+	/* even on a parent that stays mounted, see __detach_mounts() */
+	if (how & UMOUNT_COVER)
+		return true;
 	if (!(mnt->mnt_parent->mnt.mnt_flags & MNT_UMOUNT))
 		return false;
-	return (how & UMOUNT_COVER) || IS_MNT_LOCKED(mnt);
+	return IS_MNT_LOCKED(mnt);
 }
 
 /*
@@ -2184,7 +2211,10 @@ static void detach_unreachable_mounts(struct dentry *dentry)
  * leaking them.
  *
  * The dentry is unhashed before the mounts go so that no lookup finds
- * what they covered. The caller removes it for good afterwards.
+ * what they covered. Each of them leaves its cover behind on its parent.
+ * A walk that found the name earlier and crosses onto the parent there
+ * fails. The covers keep the dentry a mountpoint until their parents go
+ * away. The caller removes it for good afterwards.
  *
  * The mounts below @dentry go the same way, nobody reaches them by name
  * anymore either. A mount on the root of its parent is reached by
@@ -2884,8 +2914,8 @@ static int attach_recursive_mnt(struct mount *source_mnt,
 		/* Notice when we are propagating across user namespaces */
 		if (child->mnt_parent->mnt_ns->user_ns != user_ns)
 			lock_mnt_tree(child);
-		q = __lookup_mnt(&child->mnt_parent->mnt,
-				 child->mnt_mountpoint);
+		q = __lookup_child(&child->mnt_parent->mnt,
+				   child->mnt_mountpoint);
 		commit_tree(child);
 		if (q) {
 			struct mount *r = topmost_overmount(child);
