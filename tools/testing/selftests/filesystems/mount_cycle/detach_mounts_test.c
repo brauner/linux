@@ -18,6 +18,7 @@
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <sys/wait.h>
 
 #include "../../kselftest_harness.h"
@@ -498,6 +499,60 @@ TEST_F(detach_mounts, dead_process_takes_its_mounts)
 	/* the process is gone and so is the mount on it */
 	EXPECT_EQ(count_mounts_below(proc), 1);
 	EXPECT_EQ(umount2(proc, 0), 0);
+}
+
+/*
+ * The child binds F/mask on T/x in a mount namespace of its own and waits.
+ * The parent, where nothing is mounted on T/x, holds it open and unlinks
+ * it. The child's mount is gone and its trap is left on the child's copy
+ * of the mount. The trap doesn't keep the inode of T/x: it stays for as
+ * long as the parent's descriptor does and goes with it, while the
+ * child's mount namespace lives on.
+ */
+static int trap_child(const char *base, int to_parent, int from_parent)
+{
+	char mask[PATH_LEN], x[PATH_LEN];
+
+	snprintf(mask, sizeof(mask), "%s/F/mask", base);
+	snprintf(x, sizeof(x), "%s/T/x", base);
+	if (unshare(CLONE_NEWNS))
+		return CHILD_SETUP;
+	if (mount(mask, x, NULL, MS_BIND, NULL))
+		return CHILD_SETUP;
+	if (send_byte(to_parent) || wait_byte(from_parent))
+		return CHILD_SETUP;
+	return CHILD_OK;
+}
+
+TEST_F(detach_mounts, trap_goes_with_the_last_holder)
+{
+	struct statfs before, held, after;
+	char x[PATH_LEN];
+	pid_t pid;
+	int fd;
+
+	snprintf(x, sizeof(x), "%s/T/x", self->base);
+	pid = fork();
+	ASSERT_GE(pid, 0);
+	if (pid == 0)
+		_exit(trap_child(self->base, self->from_child[1],
+				 self->to_child[0]));
+	ASSERT_EQ(wait_byte(self->from_child[0]), 0);
+
+	ASSERT_EQ(statfs(self->base, &before), 0);
+	fd = open(x, O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ(unlink(x), 0);
+	/* the inode stays for the descriptor */
+	ASSERT_EQ(statfs(self->base, &held), 0);
+	EXPECT_EQ(held.f_ffree, before.f_ffree);
+	close(fd);
+	/* and goes with it, trap or no trap */
+	ASSERT_EQ(statfs(self->base, &after), 0);
+	EXPECT_GT(after.f_ffree, held.f_ffree);
+
+	ASSERT_EQ(send_byte(self->to_child[1]), 0);
+	EXPECT_EQ(wait_child(pid), CHILD_OK);
 }
 
 TEST_HARNESS_MAIN
