@@ -1,53 +1,31 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * An unmounted mount that would have stayed attached to its unmounted parent
- * leaves a cover behind instead. A lookup on the parent at the mountpoint
- * finds knullfs: an empty read-only directory that is shared by every cover
- * and every kernel thread, so it can't be watched or locked and nothing can
- * be mounted on it. The mount itself is a root from then on. Where a file
- * was mounted, the stand-in is an empty regular file of the same instance.
+ * leaves a cover behind instead. A walk on the parent that gets to the
+ * mountpoint fails there with ENOENT: the mount it would have crossed onto is
+ * gone. Nothing can be opened, pinned or mounted there, where a directory was
+ * mounted and where a file was. The mount itself is a root from then on.
  */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/fanotify.h>
-#include <sys/file.h>
-#include <sys/inotify.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <sys/syscall.h>
 #include <sys/vfs.h>
 #include <sys/wait.h>
 
 #include "../../kselftest_harness.h"
-#include "../readdir_hold.h"
-
-#ifndef NULL_FS_MAGIC
-#define NULL_FS_MAGIC 0x4E554C4C
-#endif
 
 #ifndef TMPFS_MAGIC
 #define TMPFS_MAGIC 0x01021994
 #endif
-
-#ifndef F_SETDELEG
-#define F_SETDELEG	(F_SETLEASE + 16)
-#endif
-
-/* struct delegation of <linux/fcntl.h>, which doesn't mix with <fcntl.h> */
-struct delegation_req {
-	uint32_t d_flags;
-	uint16_t d_type;
-	uint16_t __pad;
-};
 
 #define DIR_LEN 64
 #define PATH_LEN 128
@@ -107,7 +85,8 @@ static int enter_userns(void)
 /*
  * The child mounts P on @base/p, C on P/covered and the file P/src on P/file
  * in a mount namespace of its own, binds P a second time at @base/q and hands
- * out descriptors on P and on C. rmdir() of @base/p from here unmounts P
+ * out descriptors on P, on C and on C's mountpoint from before C was
+ * mounted. rmdir() of @base/p from here unmounts P
  * together with C and the file bind. P and C are held by the descriptors and
  * the unmounted children leave their covers behind. On request the child
  * removes C's mountpoint through the bind.
@@ -121,7 +100,7 @@ static int cover_child(const char *base, int to_parent, int from_parent)
 {
 	char p[PATH_LEN], c[PATH_LEN], q[PATH_LEN], qc[PATH_LEN];
 	char f[PATH_LEN], src[PATH_LEN], t[PATH_LEN], u[PATH_LEN], tc[PATH_LEN];
-	int fds[4], ret;
+	int fds[5], ret;
 	char cmd;
 
 	if (unshare(CLONE_NEWNS) || mount("", "/", NULL, MS_REC | MS_PRIVATE, NULL))
@@ -130,7 +109,11 @@ static int cover_child(const char *base, int to_parent, int from_parent)
 	if (mkdir(p, 0755) || mount("tmpfs", p, "tmpfs", 0, NULL))
 		return 2;
 	snprintf(c, sizeof(c), "%s/p/covered", base);
-	if (mkdir(c, 0755) || mount("tmpfs", c, "tmpfs", 0, NULL))
+	if (mkdir(c, 0755))
+		return 3;
+	/* the mountpoint itself, from before anything was mounted on it */
+	fds[4] = open(c, O_PATH | O_DIRECTORY | O_CLOEXEC);
+	if (fds[4] < 0 || mount("tmpfs", c, "tmpfs", 0, NULL))
 		return 3;
 	snprintf(f, sizeof(f), "%s/p/file", base);
 	snprintf(src, sizeof(src), "%s/p/src", base);
@@ -190,11 +173,9 @@ FIXTURE(mount_cover) {
 	int from_child;
 	int dfd;	/* P, unmounted, held */
 	int cfd;	/* C, unmounted, held */
-	int fd;		/* what a lookup on P finds at C's mountpoint */
+	int mfd;	/* C's mountpoint in P, opened before C was mounted */
 	int tfd;	/* T, unmounted, held */
 	int ufd;	/* U, a bind of T, unmounted, held */
-	int fan;	/* fanotify group from before the user namespace, or -1 */
-	struct readdir_hold hold;	/* likewise from before, uffd -1 without */
 };
 
 /*
@@ -206,19 +187,16 @@ static void cover_cleanup(FIXTURE_DATA(mount_cover) *self)
 	char cmd = CMD_QUIT;
 	int status;
 
-	if (self->fd >= 0)
-		close(self->fd);
 	if (self->cfd >= 0)
 		close(self->cfd);
 	if (self->dfd >= 0)
 		close(self->dfd);
+	if (self->mfd >= 0)
+		close(self->mfd);
 	if (self->tfd >= 0)
 		close(self->tfd);
 	if (self->ufd >= 0)
 		close(self->ufd);
-	if (self->fan >= 0)
-		close(self->fan);
-	readdir_hold_destroy(&self->hold);
 	if (self->child > 0) {
 		if (write(self->to_child, &cmd, 1) != 1)
 			kill(self->child, SIGKILL);
@@ -243,22 +221,12 @@ static int same_file(int fd1, int fd2)
 
 FIXTURE_SETUP(mount_cover)
 {
-	int to_parent[2], to_child[2], fds[4], pidfd, status;
+	int to_parent[2], to_child[2], fds[5], pidfd, status;
 	char dir[PATH_LEN];
-	struct statfs sf;
 
 	self->child = 0;
 	self->to_child = self->from_child = -1;
-	self->dfd = self->cfd = self->fd = self->tfd = self->ufd = -1;
-
-	/*
-	 * A group for plain events takes CAP_SYS_ADMIN in the initial user
-	 * namespace, so get one before that is gone. An inode mark can be
-	 * added to it from anywhere.
-	 */
-	self->fan = fanotify_init(FAN_CLASS_NOTIF | FAN_CLOEXEC, O_RDONLY);
-	/* same for the userfaultfd that holds a readdir in its fault */
-	readdir_hold_init(&self->hold);
+	self->dfd = self->cfd = self->mfd = self->tfd = self->ufd = -1;
 
 	snprintf(self->base, sizeof(self->base), "/tmp/mount_cover.XXXXXX");
 	ASSERT_NE(mkdtemp(self->base), NULL);
@@ -305,10 +273,13 @@ FIXTURE_SETUP(mount_cover)
 	self->cfd = syscall(__NR_pidfd_getfd, pidfd, fds[1], 0);
 	self->tfd = syscall(__NR_pidfd_getfd, pidfd, fds[2], 0);
 	self->ufd = syscall(__NR_pidfd_getfd, pidfd, fds[3], 0);
+	self->mfd = syscall(__NR_pidfd_getfd, pidfd, fds[4], 0);
 	close(pidfd);
 	ASSERT_GE(self->dfd, 0)
 		cover_cleanup(self);
 	ASSERT_GE(self->cfd, 0)
+		cover_cleanup(self);
+	ASSERT_GE(self->mfd, 0)
 		cover_cleanup(self);
 	ASSERT_GE(self->tfd, 0)
 		cover_cleanup(self);
@@ -326,12 +297,10 @@ FIXTURE_SETUP(mount_cover)
 	ASSERT_EQ(rmdir(dir), 0)
 		cover_cleanup(self);
 
-	self->fd = openat(self->dfd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	ASSERT_GE(self->fd, 0)
+	/* the cover fails the walk, there is nothing to hold */
+	ASSERT_EQ(openat(self->dfd, "covered", O_PATH | O_CLOEXEC), -1)
 		cover_cleanup(self);
-	ASSERT_EQ(fstatfs(self->fd, &sf), 0)
-		cover_cleanup(self);
-	ASSERT_EQ(sf.f_type, NULL_FS_MAGIC)
+	ASSERT_EQ(errno, ENOENT)
 		cover_cleanup(self);
 }
 
@@ -340,96 +309,50 @@ FIXTURE_TEARDOWN(mount_cover)
 	cover_cleanup(self);
 }
 
-TEST_F(mount_cover, not_watchable)
+/* every walk that gets to the cover fails there, however it gets there */
+TEST_F(mount_cover, not_reachable)
 {
-	char p[PATH_LEN];
-	int ifd;
+	struct stat st;
+	int fd;
 
-	snprintf(p, sizeof(p), "/proc/self/fd/%d", self->fd);
-
-	ifd = inotify_init1(IN_CLOEXEC);
-	if (ifd < 0 && errno == ENOSYS) {
-		TH_LOG("no inotify in this kernel, skipping that part");
-	} else {
-		ASSERT_GE(ifd, 0);
-		EXPECT_EQ(inotify_add_watch(ifd, p, IN_OPEN), -1);
-		EXPECT_EQ(errno, EINVAL);
-		close(ifd);
-	}
-
-	/* dnotify ends up at the same place */
-	EXPECT_EQ(fcntl(self->fd, F_NOTIFY, DN_ACCESS), -1);
-	EXPECT_EQ(errno, EINVAL);
-
-	if (self->fan < 0) {
-		TH_LOG("no fanotify group without CAP_SYS_ADMIN in the initial user namespace, skipping the fanotify part");
-		return;
-	}
-	EXPECT_EQ(fanotify_mark(self->fan, FAN_MARK_ADD, FAN_OPEN, self->fd, NULL), -1);
-	EXPECT_EQ(errno, EINVAL);
+	EXPECT_EQ(openat(self->dfd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
+	EXPECT_EQ(openat(self->dfd, "covered", O_PATH | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
+	EXPECT_EQ(fstatat(self->dfd, "covered", &st, 0), -1);
+	EXPECT_EQ(errno, ENOENT);
+	EXPECT_EQ(faccessat(self->dfd, "covered", F_OK, 0), -1);
+	EXPECT_EQ(errno, ENOENT);
+	/* nor below it */
+	EXPECT_EQ(openat(self->dfd, "covered/x", O_RDONLY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
+	/* where a file was mounted it is the same */
+	EXPECT_EQ(openat(self->dfd, "file", O_RDONLY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
+	EXPECT_EQ(fstatat(self->dfd, "file", &st, 0), -1);
+	EXPECT_EQ(errno, ENOENT);
+	/* the unmounted parent itself is fine */
+	fd = openat(self->dfd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	close(fd);
 }
 
-TEST_F(mount_cover, not_lockable)
-{
-	struct flock fl = {
-		.l_type = F_RDLCK,
-		.l_whence = SEEK_SET,
-	};
-
-	EXPECT_EQ(flock(self->fd, LOCK_EX | LOCK_NB), -1);
-	EXPECT_EQ(errno, ENOLCK);
-	EXPECT_EQ(fcntl(self->fd, F_SETLK, &fl), -1);
-	EXPECT_EQ(errno, ENOLCK);
-	EXPECT_EQ(fcntl(self->fd, F_GETLK, &fl), -1);
-	EXPECT_EQ(errno, ENOLCK);
-}
-
-/* a lease is refused for the owner and for everybody else alike */
-TEST_F(mount_cover, not_leasable)
-{
-	struct delegation_req deleg = {
-		.d_type = F_RDLCK,
-	};
-
-	EXPECT_EQ(fcntl(self->fd, F_SETLEASE, F_RDLCK), -1);
-	EXPECT_TRUE(errno == EINVAL || errno == EACCES);
-	EXPECT_EQ(fcntl(self->fd, F_SETDELEG, &deleg), -1);
-	EXPECT_TRUE(errno == EINVAL || errno == EACCES);
-}
-
+/*
+ * Nothing can be mounted on the cover. The walk to it fails, and a
+ * descriptor on the mountpoint from before the mount gets the same
+ * answer from the mount code itself.
+ */
 TEST_F(mount_cover, not_mountable)
 {
 	char p[PATH_LEN];
 
-	snprintf(p, sizeof(p), "/proc/self/fd/%d", self->fd);
+	snprintf(p, sizeof(p), "/proc/self/fd/%d/covered", self->dfd);
 	EXPECT_EQ(mount("tmpfs", p, "tmpfs", 0, NULL), -1);
 	EXPECT_EQ(errno, ENOENT);
-}
 
-TEST_F(mount_cover, read_only)
-{
-	struct statvfs sv;
-
-	EXPECT_EQ(mkdirat(self->fd, "x", 0755), -1);
+	snprintf(p, sizeof(p), "/proc/self/fd/%d", self->mfd);
+	EXPECT_EQ(mount("tmpfs", p, "tmpfs", 0, NULL), -1);
 	EXPECT_EQ(errno, ENOENT);
-	EXPECT_EQ(fchmod(self->fd, 0777), -1);
-	EXPECT_EQ(errno, EROFS);
-	/* the immutable inode is checked before the read-only mount */
-	EXPECT_EQ(faccessat(self->fd, ".", W_OK, 0), -1);
-	EXPECT_EQ(errno, EPERM);
-	ASSERT_EQ(fstatvfs(self->fd, &sv), 0);
-	EXPECT_TRUE(sv.f_flag & ST_RDONLY);
-}
-
-/* the stand-in is a root of its own, ".." stays put */
-TEST_F(mount_cover, island)
-{
-	int fd;
-
-	fd = openat(self->fd, "..", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	EXPECT_TRUE(same_file(fd, self->fd));
-	close(fd);
 }
 
 /*
@@ -449,22 +372,18 @@ TEST_F(mount_cover, held_child_detached)
 	EXPECT_TRUE(same_file(fd, self->cfd));
 	close(fd);
 
-	fd = openat(self->dfd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	ASSERT_EQ(fstatfs(fd, &sf), 0);
-	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
-	close(fd);
+	EXPECT_EQ(openat(self->dfd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
 }
 
 /*
- * The cover goes with its mountpoint: once the child has removed C's
- * mountpoint through the bind of P, the name is gone from P as well.
- * What was opened through the cover before stays open.
+ * Once the child has removed C's mountpoint through the bind of P, the
+ * name is gone from P and a lookup fails with ENOENT before it gets to
+ * the cover.
  */
-TEST_F(mount_cover, cover_goes_with_mountpoint)
+TEST_F(mount_cover, removed_mountpoint)
 {
 	char cmd = CMD_RMDIR;
-	struct statfs sf;
 	int ret;
 
 	ASSERT_EQ(write(self->to_child, &cmd, 1), 1);
@@ -473,94 +392,21 @@ TEST_F(mount_cover, cover_goes_with_mountpoint)
 
 	EXPECT_EQ(openat(self->dfd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
 	EXPECT_EQ(errno, ENOENT);
-	ASSERT_EQ(fstatfs(self->fd, &sf), 0);
-	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
-}
-
-/*
- * A readdir of the stand-in holds nothing that others wait for: one holder
- * sticks in the page fault of its buffer, and a create and a lookup of
- * another come back meanwhile.
- */
-TEST_F(mount_cover, readdir_blocks_nobody)
-{
-	bool stalled;
-
-	if (self->hold.uffd < 0)
-		SKIP(return, "test requires userfaultfd");
-	ASSERT_EQ(readdir_hold_check(&self->hold, self->fd, &stalled), 0);
-	EXPECT_FALSE(stalled);
-}
-
-/* where a file was mounted, the stand-in is an empty regular file */
-TEST_F(mount_cover, file_stand_in)
-{
-	char src[PATH_LEN], p[PATH_LEN];
-	struct statfs sf;
-	struct stat st;
-	char c;
-	int fd;
-
-	fd = openat(self->dfd, "file", O_RDONLY | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	ASSERT_EQ(fstat(fd, &st), 0);
-	EXPECT_TRUE(S_ISREG(st.st_mode));
-	ASSERT_EQ(fstatfs(fd, &sf), 0);
-	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
-	/* the two stand-ins are two inodes */
-	EXPECT_FALSE(same_file(fd, self->fd));
-	EXPECT_EQ(read(fd, &c, 1), 0);
-	EXPECT_EQ(flock(fd, LOCK_EX | LOCK_NB), -1);
-	EXPECT_EQ(errno, ENOLCK);
-
-	snprintf(src, sizeof(src), "%s/src", self->base);
-	ASSERT_EQ(touch(src), 0);
-	snprintf(p, sizeof(p), "/proc/self/fd/%d", fd);
-	EXPECT_EQ(mount(src, p, NULL, MS_BIND, NULL), -1);
-	EXPECT_EQ(errno, ENOENT);
-	close(fd);
-
-	/* writes and truncates go nowhere, like /dev/null */
-	fd = openat(self->dfd, "file", O_WRONLY | O_TRUNC | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	EXPECT_EQ(write(fd, "xy", 2), 2);
-	EXPECT_EQ(ftruncate(fd, 4), 0);
-	ASSERT_EQ(fstat(fd, &st), 0);
-	EXPECT_EQ(st.st_size, 0);
-	/* the shared inode keeps its identity */
-	EXPECT_EQ(fchmod(fd, 0600), -1);
-	EXPECT_EQ(errno, EPERM);
-	close(fd);
-	fd = openat(self->dfd, "file", O_RDONLY | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	EXPECT_EQ(read(fd, &c, 1), 0);
-	close(fd);
-
-	EXPECT_EQ(openat(self->dfd, "file", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
-	EXPECT_EQ(errno, ENOTDIR);
 }
 
 /*
  * Two unmounted parents left covers on the same dentry. A lookup on
- * either finds a stand-in, and U's cover stays when T goes.
+ * either fails, and U's cover stays when T goes.
  */
 TEST_F(mount_cover, shared_mountpoint)
 {
 	char cmd = CMD_CLOSE_T;
-	struct statfs sf;
-	int fd, ret;
+	int ret;
 
-	fd = openat(self->tfd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	ASSERT_EQ(fstatfs(fd, &sf), 0);
-	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
-	close(fd);
-
-	fd = openat(self->ufd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	ASSERT_EQ(fstatfs(fd, &sf), 0);
-	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
-	close(fd);
+	EXPECT_EQ(openat(self->tfd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
+	EXPECT_EQ(openat(self->ufd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
 
 	/* the last references to T go, with T its cover */
 	ASSERT_EQ(write(self->to_child, &cmd, 1), 1);
@@ -569,11 +415,8 @@ TEST_F(mount_cover, shared_mountpoint)
 	close(self->tfd);
 	self->tfd = -1;
 
-	fd = openat(self->ufd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	ASSERT_GE(fd, 0);
-	ASSERT_EQ(fstatfs(fd, &sf), 0);
-	EXPECT_EQ(sf.f_type, NULL_FS_MAGIC);
-	close(fd);
+	EXPECT_EQ(openat(self->ufd, "covered", O_RDONLY | O_DIRECTORY | O_CLOEXEC), -1);
+	EXPECT_EQ(errno, ENOENT);
 }
 
 TEST_HARNESS_MAIN

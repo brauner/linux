@@ -4,9 +4,6 @@ TEST_GEN_PROGS += nsfs_rbind_loop_test overmount_ns_file_test
 
 CFLAGS += -Wall -O2 -g $(KHDR_INCLUDES)
 
-LOCAL_HDRS += ../readdir_hold.h
-
 include ../../lib.mk
 
 $(OUTPUT)/locked_handle_test: LDLIBS += -pthread
-$(OUTPUT)/mount_cover_test: LDLIBS += -pthread
