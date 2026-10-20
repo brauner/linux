@@ -236,7 +236,7 @@ enum d_walk_ret {
 	D_WALK_NORETRY,
 	D_WALK_SKIP,
 };
-extern bool d_walk_mountpoints(struct dentry *dentry, void *data,
+extern void d_walk_mountpoints(struct dentry *dentry, void *data,
 			       enum d_walk_ret (*enter)(void *, struct dentry *));
 extern int d_set_mounted(struct dentry *dentry);
 extern long prune_dcache_sb(struct super_block *sb, struct shrink_control *sc);
