@@ -1964,7 +1964,8 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 		p->mnt.mnt_flags |= MNT_UMOUNT;
 		if (mnt_ns_attached(p))
 			move_from_ns(p);
-		list_add_tail(&p->mnt_list, &tmp_list);
+		/* off the list of a caller that collected it, see detach_unreachable_mounts() */
+		list_move_tail(&p->mnt_list, &tmp_list);
 	}
 
 	/* Hide the mounts from mnt_mounts */
@@ -2176,15 +2177,14 @@ static enum d_walk_ret collect_unreachable(void *data, struct dentry *mountpoint
 /*
  * Detach the mounts on @dentry and below it and leave their covers
  * behind. One walk collects them. A mount below another one goes with
- * it, so the tree of each one is taken off the list before umount_tree()
- * gathers it on its own.
+ * it, umount_tree() takes it off the list when it gathers the tree.
  *
  * locks: namespace_sem[excl]
  */
 static void detach_unreachable_mounts(struct dentry *dentry)
 {
 	LIST_HEAD(unreachable);
-	struct mount *mnt, *p;
+	struct mount *mnt;
 
 	/* the walk only reads, lockless walkers don't have to wait for it */
 	scoped_guard(mount_locked_reader)
@@ -2195,8 +2195,6 @@ static void detach_unreachable_mounts(struct dentry *dentry)
 	guard(mount_writer)();
 	while (!list_empty(&unreachable)) {
 		mnt = list_first_entry(&unreachable, struct mount, mnt_list);
-		for (p = mnt; p; p = next_mnt(p, mnt))
-			list_del_init(&p->mnt_list);
 		event++;
 		umount_tree(mnt, UMOUNT_COVER);
 	}

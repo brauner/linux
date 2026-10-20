@@ -1946,8 +1946,7 @@ void d_invalidate_removed(struct dentry *dentry)
 	/* nothing gets mounted on a removed name, like vfs_unlink() does */
 	dont_mount(dentry);
 	d_invalidate(dentry);
-	if (dentry->d_inode)
-		__detach_mounts(dentry);
+	detach_mounts(dentry);
 }
 EXPORT_SYMBOL(d_invalidate_removed);
 
