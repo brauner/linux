@@ -1540,19 +1540,14 @@ static void d_walk(struct dentry *parent, void *data,
 struct mountpoint_walk {
 	void *data;
 	enum d_walk_ret (*enter)(void *, struct dentry *);
-	bool found;
 };
 
 static enum d_walk_ret mountpoint_walk_enter(void *_data, struct dentry *dentry)
 {
 	struct mountpoint_walk *walk = _data;
 
-	/* only the directories d_set_mounted() marked lead to one */
-	if (!d_mountpoint_below(dentry))
-		return D_WALK_SKIP;
 	if (!d_mountpoint(dentry))
 		return D_WALK_CONTINUE;
-	walk->found = true;
 	return walk->enter(walk->data, dentry);
 }
 
@@ -1562,10 +1557,10 @@ static enum d_walk_ret mountpoint_walk_enter(void *_data, struct dentry *dentry)
  * @data:	data passed to @enter() callback
  * @enter:	callback for every mountpoint, returns what d_walk()'s does
  *
- * Only the directories that d_set_mounted() marked are descended into.
  * rename_lock is held for the whole walk, so the parents @enter() sees
- * are the ones the mountpoints have, and it is called with d_lock held
- * like d_walk()'s callback. A hint that led nowhere is cleared.
+ * are the ones the mountpoints have and nothing below @dentry becomes a
+ * mountpoint in the meantime, see d_set_mounted(). @enter() is called
+ * with d_lock held like d_walk()'s callback.
  */
 void d_walk_mountpoints(struct dentry *dentry, void *data,
 			enum d_walk_ret (*enter)(void *, struct dentry *))
@@ -1577,12 +1572,6 @@ void d_walk_mountpoints(struct dentry *dentry, void *data,
 
 	read_seqlock_excl(&rename_lock);
 	__d_walk(dentry, &walk, mountpoint_walk_enter, true);
-	/* nothing gets below without rename_lock, see d_set_mounted() */
-	if (!walk.found && (dentry->d_flags & DCACHE_MOUNTED_BELOW)) {
-		spin_lock(&dentry->d_lock);
-		dentry->d_flags &= ~DCACHE_MOUNTED_BELOW;
-		spin_unlock(&dentry->d_lock);
-	}
 	read_sequnlock_excl(&rename_lock);
 }
 
@@ -1646,18 +1635,6 @@ int d_set_mounted(struct dentry *dentry)
 			spin_unlock(&p->d_lock);
 			goto out;
 		}
-		/* the hint for d_walk_mountpoints() */
-		p->d_flags |= DCACHE_MOUNTED_BELOW;
-		spin_unlock(&p->d_lock);
-	}
-	/*
-	 * The root the loop stops at is unhashed but not unlinked and gets
-	 * the hint as well: a disconnected one is spliced under a name
-	 * later and takes the mountpoints below it along.
-	 */
-	if (p != dentry) {
-		spin_lock(&p->d_lock);
-		p->d_flags |= DCACHE_MOUNTED_BELOW;
 		spin_unlock(&p->d_lock);
 	}
 	spin_lock(&dentry->d_lock);
@@ -3108,27 +3085,6 @@ static void copy_name(struct dentry *dentry, struct dentry *target)
 }
 
 /*
- * The directories above a mountpoint carry DCACHE_MOUNTED_BELOW up to the
- * root, see d_set_mounted(). A move of a dentry with mountpoints below it
- * marks the directories it moves under. Called under rename_lock and
- * before the move takes any d_lock, the ancestors are locked one at a
- * time.
- */
-static void d_mark_mounted_below(struct dentry *parent)
-{
-	struct dentry *p = parent;
-
-	for (;;) {
-		spin_lock(&p->d_lock);
-		p->d_flags |= DCACHE_MOUNTED_BELOW;
-		spin_unlock(&p->d_lock);
-		if (IS_ROOT(p))
-			break;
-		p = p->d_parent;
-	}
-}
-
-/*
  * __d_move - move a dentry
  * @dentry: entry to move
  * @target: new dentry
@@ -3153,12 +3109,6 @@ static void __d_move(struct dentry *dentry, struct dentry *target,
 	BUG_ON(d_ancestor(target, dentry));
 	old_parent = dentry->d_parent;
 	p = d_ancestor(old_parent, target);
-
-	/* the mountpoints below move along */
-	if (d_mountpoint_below(dentry))
-		d_mark_mounted_below(target->d_parent);
-	if (exchange && d_mountpoint_below(target))
-		d_mark_mounted_below(old_parent);
 	if (IS_ROOT(dentry)) {
 		BUG_ON(p);
 		spin_lock(&target->d_parent->d_lock);
