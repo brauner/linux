@@ -77,6 +77,7 @@ static atomic_int d_is_e;		/* d has been renamed to e */
 static atomic_int cover_tfd = -1;	/* cover d/f in this copy of F as well */
 static atomic_int f_findable;
 static atomic_long nr_unlinks;
+static atomic_int d_present = 1;	/* the server deleted d when 0 */
 
 /* ---- a helper thread runs the syscalls a server thread waits for ---- */
 
@@ -89,11 +90,12 @@ static char job_path[160];
 static const char *job_name;
 static int job_seq, done_seq, job_ret;
 
-static int cover(int tfd, const char *name)
+/* mount a copy of @src on @name in the copy @tfd of F */
+static int cover_from(int tfd, const char *src, const char *name)
 {
 	int mfd, ret = 0;
 
-	mfd = syscall(SYS_open_tree, AT_FDCWD, markpath,
+	mfd = syscall(SYS_open_tree, AT_FDCWD, src,
 		      OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
 	if (mfd < 0)
 		return -errno;
@@ -101,6 +103,30 @@ static int cover(int tfd, const char *name)
 		ret = -errno;
 	close(mfd);
 	return ret;
+}
+
+static int cover(int tfd, const char *name)
+{
+	return cover_from(tfd, markpath, name);
+}
+
+/* tell the kernel that @name in @parent, node @child, is gone */
+static int notify_delete(uint64_t parent, uint64_t child, const char *name)
+{
+	struct fuse_notify_delete_out d = {
+		.parent = parent,
+		.child = child,
+		.namelen = strlen(name),
+	};
+	struct fuse_out_header oh = {
+		.len = sizeof(oh) + sizeof(d) + d.namelen + 1,
+		.error = FUSE_NOTIFY_DELETE,
+	};
+	struct iovec iov[3] = {
+		{ &oh, sizeof(oh) }, { &d, sizeof(d) }, { (void *)name, d.namelen + 1 }
+	};
+
+	return writev(ffd, iov, 3) < 0 ? -errno : 0;
 }
 
 static void *helper(void *arg)
@@ -236,6 +262,10 @@ static void lookup(struct fuse_in_header *ih, const char *name)
 	} else if (ih->nodeid == ROOT_ID && (!strcmp(name, "d") || !strcmp(name, "e"))) {
 		bool is_e = name[0] == 'e';
 
+		if (!is_e && !atomic_load(&d_present)) {
+			reply(ih->unique, -ENOENT, NULL, 0);
+			return;
+		}
 		/*
 		 * The walker revalidates d: rename it to e first. The answer
 		 * is then about a name the directory no longer has.
@@ -721,6 +751,113 @@ TEST_F(unlink_reval, plain_name_keeps_going)
 	if (w.err) {
 		EXPECT_EQ(ENOENT, w.err);
 	}
+}
+
+/*
+ * The server deletes d while MARK is mounted on d/f in a copy of F. The
+ * mount goes and its trap stays on the copy, and the trap keeps d/f: a
+ * server may go on answering for the names below a deleted directory
+ * and a new dentry for d/f would be uncovered. So a walk from a
+ * descriptor on d fails at d/f, and the notification is answered with
+ * ENOTEMPTY since d still has a child.
+ */
+TEST_F(unlink_reval, deleted_dir_keeps_its_trap_below)
+{
+	struct stat st;
+	int dfd;
+
+	ASSERT_EQ(0, stat(fmnt, &st));
+	self->tfd = syscall(SYS_open_tree, AT_FDCWD, fmnt, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
+	ASSERT_GE(self->tfd, 0);
+	dfd = openat(self->tfd, "d", O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(dfd, 0);
+	ASSERT_EQ(0, fstatat(self->tfd, "d/f", &st, 0));
+	ASSERT_EQ(0, cover(self->tfd, "d/f"));
+
+	atomic_store(&d_present, 0);
+	EXPECT_EQ(-ENOTEMPTY, notify_delete(ROOT_ID, D_ID, "d"));
+	EXPECT_EQ(-1, fstatat(dfd, "f", &st, 0)) {
+		TH_LOG("d/f is reachable through the deleted d");
+	}
+	EXPECT_EQ(ENOENT, errno);
+	close(dfd);
+}
+
+/*
+ * A delete notification for a node the name doesn't have is answered
+ * with ENOENT and leaves the entry alone: d is invalidated, not removed,
+ * and comes back with MARK still on d/f.
+ */
+TEST_F(unlink_reval, delete_of_the_wrong_node_keeps_mounts)
+{
+	char buf[16] = {};
+	struct stat st;
+	int fd;
+
+	ASSERT_EQ(0, stat(fmnt, &st));
+	self->tfd = syscall(SYS_open_tree, AT_FDCWD, fmnt, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
+	ASSERT_GE(self->tfd, 0);
+	ASSERT_EQ(0, fstatat(self->tfd, "d/f", &st, 0));
+	ASSERT_EQ(0, cover(self->tfd, "d/f"));
+
+	ASSERT_EQ(-ENOENT, notify_delete(ROOT_ID, 99, "d"));
+	fd = openat(self->tfd, "d/f", O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0) {
+		TH_LOG("d/f lost its mark: %s", strerror(errno));
+	}
+	ASSERT_GT(read(fd, buf, sizeof(buf) - 1), 0);
+	EXPECT_STREQ(MARK, buf);
+	close(fd);
+}
+
+/*
+ * The server deletes d, which has a directory mounted on it in a copy of
+ * F, and hands its node out as e while a descriptor keeps the old dentry.
+ * The trap the mount left is keyed to that dentry, so a lookup of e must
+ * not move it along: e is busy until the descriptor goes. Then e is a
+ * dentry of its own and works.
+ */
+TEST_F(unlink_reval, deleted_dir_handed_out_again_is_busy)
+{
+	char mdir[128], mfile[128], buf[16] = {};
+	struct stat st;
+	int dfd, fd;
+
+	snprintf(mdir, sizeof(mdir), "%s/md", self->dir);
+	snprintf(mfile, sizeof(mfile), "%s/md/f", self->dir);
+	ASSERT_EQ(0, mkdir(mdir, 0755));
+	fd = open(mfile, O_CREAT | O_WRONLY | O_CLOEXEC, 0644);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ((ssize_t)sizeof(MARK) - 1, write(fd, MARK, sizeof(MARK) - 1));
+	close(fd);
+
+	ASSERT_EQ(0, stat(fmnt, &st));
+	self->tfd = syscall(SYS_open_tree, AT_FDCWD, fmnt, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
+	ASSERT_GE(self->tfd, 0);
+	/* the descriptor is on d itself, taken before the mount covers it */
+	dfd = openat(self->tfd, "d", O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(dfd, 0);
+	ASSERT_EQ(0, cover_from(self->tfd, mdir, "d"));
+	fd = openat(self->tfd, "d/f", O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	ASSERT_GT(read(fd, buf, sizeof(buf) - 1), 0);
+	ASSERT_STREQ(MARK, buf);
+	close(fd);
+
+	atomic_store(&d_present, 0);
+	ASSERT_EQ(0, notify_delete(ROOT_ID, D_ID, "d"));
+	atomic_store(&d_is_e, 1);
+	EXPECT_EQ(-1, fstatat(self->tfd, "e", &st, 0)) {
+		TH_LOG("e came back with the trap of d on it");
+	}
+	EXPECT_EQ(EBUSY, errno);
+
+	close(dfd);
+	/* the trap went with the dentry, e is a new one */
+	EXPECT_EQ(0, fstatat(self->tfd, "e", &st, 0)) {
+		TH_LOG("e is still refused: %s", strerror(errno));
+	}
+	atomic_store(&d_is_e, 0);
 }
 
 TEST_HARNESS_MAIN
