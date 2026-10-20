@@ -2224,9 +2224,6 @@ void __detach_mounts(struct dentry *dentry)
 {
 	struct mountpoint *mp;
 
-	if (!d_mountpoint_below(dentry))
-		return;
-
 	guard(namespace_excl)();
 
 	/* the name goes first, what covered it goes second */
