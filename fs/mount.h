@@ -165,7 +165,8 @@ extern void mountpoint_dentry_killed(struct dentry *dentry);
 
 static inline void detach_mounts(struct dentry *dentry)
 {
-	if (!d_mountpoint_below(dentry))
+	/* nothing on it, nothing held below it: the callers pruned the rest */
+	if (!d_mountpoint(dentry) && hlist_empty(&dentry->d_children))
 		return;
 	__detach_mounts(dentry);
 }
