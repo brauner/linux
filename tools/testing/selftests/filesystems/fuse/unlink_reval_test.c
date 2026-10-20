@@ -15,6 +15,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <poll.h>
 #include <pthread.h>
 #include <sched.h>
@@ -51,6 +52,7 @@
 
 #define NR_SERVERS	8
 #define WALK_SECS	5
+#define NOBODY		65534
 
 enum {
 	ROOT_ID = FUSE_ROOT_ID,
@@ -514,7 +516,7 @@ FIXTURE_SETUP(unlink_reval)
 
 	ffd = open("/dev/fuse", O_RDWR | O_CLOEXEC);
 	ASSERT_GE(ffd, 0);
-	snprintf(opts, sizeof(opts), "fd=%d,rootmode=40000,user_id=0,group_id=0", ffd);
+	snprintf(opts, sizeof(opts), "fd=%d,rootmode=40000,user_id=0,group_id=0,allow_other", ffd);
 	ASSERT_EQ(0, mount("fuse", fmnt, "fuse", MS_NOSUID | MS_NODEV, opts));
 	for (int i = 0; i < NR_SERVERS; i++)
 		ASSERT_EQ(0, pthread_create(&t, NULL, server, NULL));
@@ -976,6 +978,97 @@ TEST_F(unlink_reval, unshare_from_a_deleted_dir_fails)
 	close(dfd);
 	close(outfd);
 	close(ffd_dir);
+}
+
+/* what a child with its cwd on d sees of d/f, step by step */
+struct cwd_probe {
+	int err[3];
+	char buf[3][16];
+	int unshare_err;
+};
+
+static void probe(struct cwd_probe *p, int step)
+{
+	int fd = open("f", O_RDONLY | O_CLOEXEC);
+
+	if (fd < 0) {
+		p->err[step] = errno;
+		return;
+	}
+	if (read(fd, p->buf[step], sizeof(p->buf[step]) - 1) < 0)
+		p->err[step] = errno;
+	close(fd);
+}
+
+/*
+ * The same for a task without privileges: the server deletes d while
+ * MARK is mounted on d/f in F itself and a child has its cwd on d as
+ * nobody. It reads MARK before the delete and is refused d/f after it.
+ * Then it unshares its user and mount namespace, which anyone may do and
+ * which would move its cwd to a copy of F without the trap. That is
+ * refused as well, and if it ever goes through the copy must not show
+ * what MARK covered.
+ */
+TEST_F(unlink_reval, unshare_from_a_deleted_dir_fails_for_nobody)
+{
+	int ready[2], go[2], res[2];
+	char dpath[160], fpath[160];
+	struct cwd_probe p = {};
+	struct stat st;
+	char c = 0;
+	pid_t pid;
+
+	snprintf(dpath, sizeof(dpath), "%s/d", fmnt);
+	snprintf(fpath, sizeof(fpath), "%s/d/f", fmnt);
+	ASSERT_EQ(0, stat(fpath, &st));
+	ASSERT_EQ(0, mount(markpath, fpath, NULL, MS_BIND, NULL));
+
+	ASSERT_EQ(0, pipe2(ready, O_CLOEXEC));
+	ASSERT_EQ(0, pipe2(go, O_CLOEXEC));
+	ASSERT_EQ(0, pipe2(res, O_CLOEXEC));
+	pid = fork();
+	ASSERT_GE(pid, 0);
+	if (!pid) {
+		/* nobody, with its cwd on d before d goes */
+		if (setgroups(0, NULL) || setresgid(NOBODY, NOBODY, NOBODY) ||
+		    setresuid(NOBODY, NOBODY, NOBODY) || chdir(dpath))
+			_exit(1);
+		probe(&p, 0);
+		if (write(ready[1], &c, 1) != 1 || read(go[0], &c, 1) != 1)
+			_exit(1);
+		probe(&p, 1);
+		if (unshare(CLONE_NEWUSER | CLONE_NEWNS))
+			p.unshare_err = errno;
+		else
+			probe(&p, 2);
+		if (write(res[1], &p, sizeof(p)) != sizeof(p))
+			_exit(1);
+		_exit(0);
+	}
+	close(ready[1]);
+	close(go[0]);
+	close(res[1]);
+	ASSERT_EQ(1, read(ready[0], &c, 1));
+
+	atomic_store(&d_present, 0);
+	EXPECT_EQ(-ENOTEMPTY, notify_delete(ROOT_ID, D_ID, "d"));
+	ASSERT_EQ(1, write(go[1], &c, 1));
+	ASSERT_EQ((ssize_t)sizeof(p), read(res[0], &p, sizeof(p)));
+	waitpid(pid, NULL, 0);
+
+	EXPECT_EQ(0, p.err[0]);
+	EXPECT_STREQ(MARK, p.buf[0]);
+	EXPECT_EQ(ENOENT, p.err[1]) {
+		TH_LOG("d/f is reachable through the deleted d, read \"%s\"", p.buf[1]);
+	}
+	EXPECT_EQ(ENOENT, p.unshare_err) {
+		if (p.unshare_err)
+			TH_LOG("unshare(CLONE_NEWUSER | CLONE_NEWNS) as nobody: %s",
+			       strerror(p.unshare_err));
+		else
+			TH_LOG("unshare(CLONE_NEWUSER | CLONE_NEWNS) as nobody went through, d/f in the copy: %s \"%s\"",
+			       p.err[2] ? strerror(p.err[2]) : "opened", p.buf[2]);
+	}
 }
 
 TEST_HARNESS_MAIN
