@@ -25,6 +25,7 @@ static const char fs_state_chars[] = {
 	[BTRFS_FS_STATE_SKIP_META_CSUMS]	= 'S',
 	[BTRFS_FS_STATE_LOG_CLEANUP_ERROR]	= 'L',
 	[BTRFS_FS_STATE_EMERGENCY_SHUTDOWN]	= 'E',
+	[BTRFS_FS_STATE_EMERGENCY_RO]		= 0,
 };
 
 static void btrfs_state_to_string(const struct btrfs_fs_info *info, char *buf)
@@ -130,10 +131,10 @@ void __btrfs_handle_fs_error(struct btrfs_fs_info *fs_info, const char *function
 #endif
 
 	/*
-	 * Special case: if the error is EROFS, and we're already under
-	 * SB_RDONLY, then it is safe here.
+	 * Special case: if the error is EROFS, and we're already read-only,
+	 * then it is safe here.
 	 */
-	if (error == -EROFS && sb_rdonly(sb))
+	if (error == -EROFS && btrfs_fs_rdonly(fs_info))
 		return;
 
 #ifdef CONFIG_PRINTK
@@ -166,13 +167,21 @@ void __btrfs_handle_fs_error(struct btrfs_fs_info *fs_info, const char *function
 	if (!(sb->s_flags & SB_BORN))
 		return;
 
-	if (sb_rdonly(sb))
+	if (btrfs_fs_rdonly(fs_info))
 		return;
 
 	btrfs_discard_stop(fs_info);
 
-	/* Handle error by forcing the filesystem readonly. */
-	btrfs_set_sb_rdonly(sb);
+	/*
+	 * Handle error by forcing the filesystem readonly. We don't set
+	 * SB_RDONLY because that requires sb->s_umount, and changing it under
+	 * freeze_super() and thaw_super() leaves the freeze protection
+	 * unbalanced. The fs_error recorded above stops new transactions and
+	 * BTRFS_FS_STATE_RO makes btrfs refuse modifications, see
+	 * btrfs_fs_rdonly().
+	 */
+	set_bit(BTRFS_FS_STATE_RO, &fs_info->fs_state);
+	set_bit(BTRFS_FS_STATE_EMERGENCY_RO, &fs_info->fs_state);
 	btrfs_info(fs_info, "forced readonly");
 	/*
 	 * Note that a running device replace operation is not canceled here
