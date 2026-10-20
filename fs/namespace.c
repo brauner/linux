@@ -2282,6 +2282,44 @@ bool mounts_follow(struct dentry *dentry)
 }
 
 /*
+ * Would a copy of @path->mnt be without a cover that @path reaches? The
+ * covers the mounts of a removed name left behind sit on the mount they
+ * were detached from and a copy of it starts without any. Nothing reaches
+ * the names below a removed directory anymore except through a cwd, a
+ * root or a bind rooted inside it, and those keep their dentry when the
+ * mount is copied. So a copy made from inside a removed directory walks
+ * onto what the mounts covered. Whether the covers of the mount sit below
+ * that directory isn't checked: a mount with covers has traps and @path
+ * is in a directory that is gone, see copy_mnt_ns() and __do_loopback().
+ *
+ * locks: namespace_sem, no cover is left behind while we look
+ */
+static bool copy_loses_covers(const struct path *path)
+{
+	struct dentry *p;
+	unsigned seq = 0;
+	bool removed;
+
+	if (likely(hlist_empty(&real_mount(path->mnt)->mnt_covers)))
+		return false;
+
+	/* inside a removed directory? lockless once, then under the lock */
+	rcu_read_lock();
+again:
+	read_seqbegin_or_lock(&rename_lock, &seq);
+	removed = false;
+	for (p = path->dentry; !removed && !IS_ROOT(p); p = p->d_parent)
+		removed = d_unlinked(p);
+	if (need_seqretry(&rename_lock, seq)) {
+		seq = 1;
+		goto again;
+	}
+	done_seqretry(&rename_lock, seq);
+	rcu_read_unlock();
+	return removed;
+}
+
+/*
  * Is the caller allowed to modify his namespace?
  */
 bool may_mount(void)
@@ -3320,6 +3358,10 @@ static struct mount *__do_loopback(const struct path *old_path,
 	/* a pseudo dentry is freed without an RCU delay, no walk may find it */
 	if (old_path->dentry->d_flags & DCACHE_NORCU)
 		return ERR_PTR(-EINVAL);
+
+	/* a copy rooted inside a removed directory has none of the covers below it */
+	if (copy_loses_covers(old_path))
+		return ERR_PTR(-ENOENT);
 
 	if (recurse && !old->mnt_ns)
 		return ERR_PTR(-EINVAL);
@@ -4654,6 +4696,18 @@ struct mnt_namespace *copy_mnt_ns(u64 flags, struct mnt_namespace *ns,
 		return new_ns;
 
 	guard(namespace_excl)();
+
+	/*
+	 * The root and cwd of the task move to the copies of their mounts
+	 * with their dentries, see below. From inside a removed directory
+	 * that loses the covers below it, the copies have none.
+	 */
+	if (new_fs && !(flags & CLONE_EMPTY_MNTNS) &&
+	    (copy_loses_covers(&new_fs->root) ||
+	     copy_loses_covers(&new_fs->pwd))) {
+		emptied_ns = new_ns;
+		return ERR_PTR(-ENOENT);
+	}
 
 	if (flags & CLONE_EMPTY_MNTNS)
 		copy_flags = 0;
