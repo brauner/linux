@@ -42,6 +42,9 @@
 #ifndef OPEN_TREE_CLOEXEC
 #define OPEN_TREE_CLOEXEC	O_CLOEXEC
 #endif
+#ifndef OPEN_TREE_NAMESPACE
+#define OPEN_TREE_NAMESPACE	(1 << 1)
+#endif
 #ifndef MOVE_MOUNT_F_EMPTY_PATH
 #define MOVE_MOUNT_F_EMPTY_PATH	0x00000004
 #endif
@@ -858,6 +861,121 @@ TEST_F(unlink_reval, deleted_dir_handed_out_again_is_busy)
 		TH_LOG("e is still refused: %s", strerror(errno));
 	}
 	atomic_store(&d_is_e, 0);
+}
+
+/* run @fn in a child and return its exit code */
+static int in_child(int (*fn)(int, int), int a, int b)
+{
+	int status;
+	pid_t pid;
+
+	pid = fork();
+	if (pid < 0)
+		return -errno;
+	if (!pid)
+		_exit(fn(a, b));
+	if (waitpid(pid, &status, 0) != pid)
+		return -errno;
+	return WIFEXITED(status) ? WEXITSTATUS(status) : -EIO;
+}
+
+enum { UNSHARE_REFUSED, UNSHARE_REVEALS, UNSHARE_WORKED, UNSHARE_OTHER };
+
+/*
+ * unshare(CLONE_NEWNS) with the cwd on @cwdfd and, if @rootfd is one, the
+ * root on that, then what f in the root or cwd reads if it went through.
+ */
+static int unshare_from(int cwdfd, int rootfd)
+{
+	char buf[16] = {};
+	int fd;
+
+	if (rootfd >= 0 && (fchdir(rootfd) || chroot(".")))
+		return UNSHARE_OTHER;
+	if (fchdir(cwdfd))
+		return UNSHARE_OTHER;
+	if (unshare(CLONE_NEWNS))
+		return errno == ENOENT ? UNSHARE_REFUSED : UNSHARE_OTHER;
+	fd = open(rootfd >= 0 ? "/f" : "f", O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return UNSHARE_WORKED;
+	if (read(fd, buf, sizeof(buf) - 1) < 0)
+		return UNSHARE_OTHER;
+	return strcmp(buf, UNDER) ? UNSHARE_WORKED : UNSHARE_REVEALS;
+}
+
+/*
+ * unshare(CLONE_NEWNS) moves the cwd and the root of the task to the
+ * copies of their mounts with the dentry, and a copy of a mount has none
+ * of the covers the removed names on it left behind. From inside a
+ * deleted directory with a trap below it the unshare is refused, and so
+ * are a copy and a new mount namespace made from the directory with
+ * open_tree(). From above the directory the unshare works with the
+ * traps still on the mount, and so it does from a deleted directory on
+ * a mount that has nothing to lose.
+ */
+TEST_F(unlink_reval, unshare_from_a_deleted_dir_fails)
+{
+	int ffd_dir, dfd, outfd, pfd, ret, err;
+	char plain[128];
+	struct stat st;
+
+	ffd_dir = open(fmnt, O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(ffd_dir, 0);
+	outfd = open(self->dir, O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(outfd, 0);
+	ASSERT_EQ(0, stat(fmnt, &st));
+	dfd = openat(ffd_dir, "d", O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(dfd, 0);
+	ASSERT_EQ(0, fstatat(ffd_dir, "d/f", &st, 0));
+	/* the cover goes on F itself, the mount the cwd and root are on */
+	ASSERT_EQ(0, cover(ffd_dir, "d/f"));
+
+	atomic_store(&d_present, 0);
+	EXPECT_EQ(-ENOTEMPTY, notify_delete(ROOT_ID, D_ID, "d"));
+
+	ret = in_child(unshare_from, dfd, -1);
+	EXPECT_EQ(UNSHARE_REFUSED, ret) {
+		TH_LOG("unshare from the deleted d %s", ret == UNSHARE_REVEALS ?
+		       "went through and f reads what the mount covered" :
+		       "didn't fail with ENOENT");
+	}
+	ret = in_child(unshare_from, outfd, dfd);
+	EXPECT_EQ(UNSHARE_REFUSED, ret) {
+		TH_LOG("unshare with the root on the deleted d %s", ret == UNSHARE_REVEALS ?
+		       "went through and /f reads what the mount covered" :
+		       "didn't fail with ENOENT");
+	}
+
+	/* the copies open_tree() makes from the directory */
+	ret = syscall(SYS_open_tree, dfd, "", AT_EMPTY_PATH | OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
+	err = errno;
+	EXPECT_EQ(-1, ret) {
+		TH_LOG("open_tree(OPEN_TREE_CLONE) of the deleted d went through");
+	}
+	EXPECT_EQ(ENOENT, err);
+	ret = syscall(SYS_open_tree, dfd, "", AT_EMPTY_PATH | OPEN_TREE_NAMESPACE | OPEN_TREE_CLOEXEC);
+	err = errno;
+	EXPECT_EQ(-1, ret) {
+		TH_LOG("open_tree(OPEN_TREE_NAMESPACE) of the deleted d went through");
+	}
+	EXPECT_EQ(ENOENT, err);
+
+	/* from above d the covers stay where they are and the copy is fine */
+	EXPECT_EQ(UNSHARE_WORKED, in_child(unshare_from, ffd_dir, -1));
+
+	/* a deleted directory on a mount without covers has nothing to lose */
+	snprintf(plain, sizeof(plain), "%s/plain", self->dir);
+	ASSERT_EQ(0, mkdir(plain, 0755));
+	pfd = open(plain, O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(pfd, 0);
+	ASSERT_EQ(0, rmdir(plain));
+	EXPECT_EQ(UNSHARE_WORKED, in_child(unshare_from, pfd, -1));
+
+	close(pfd);
+	close(dfd);
+	close(outfd);
+	close(ffd_dir);
 }
 
 TEST_HARNESS_MAIN
