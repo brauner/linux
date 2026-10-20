@@ -1627,8 +1627,9 @@ int fuse_reverse_inval_entry(struct fuse_conn *fc, u64 parent_nodeid,
 
 	fuse_dir_changed(parent);
 	if (!(flags & FUSE_EXPIRE_ONLY)) {
-		/* a deleted entry takes its mounts along */
-		if (child_nodeid)
+		/* a deleted entry takes its mounts along, if it is the one meant */
+		if (child_nodeid && d_really_is_positive(entry) &&
+		    get_node_id(d_inode(entry)) == child_nodeid)
 			d_invalidate_removed(entry);
 		else
 			d_invalidate(entry);
