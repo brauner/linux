@@ -114,11 +114,11 @@ end_wb:
 static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 					  unsigned int *notes)
 {
-	struct folio_queue *folioq = wreq->buffer.tail;
+	struct bvecq *bq = wreq->buffer.tail;
 	unsigned int slot = wreq->buffer.first_tail_slot;
 	uoff_t collected_to = wreq->collected_to;
 
-	if (WARN_ON_ONCE(!folioq)) {
+	if (WARN_ON_ONCE(!bq)) {
 		pr_err("[!] Writeback unlock found empty rolling buffer!\n");
 		netfs_dump_request(wreq);
 		return;
@@ -130,9 +130,9 @@ static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 		return;
 	}
 
-	if (slot >= folioq_nr_slots(folioq)) {
-		folioq = rolling_buffer_delete_spent(&wreq->buffer);
-		if (!folioq)
+	while (!bvecq_acquire_slot(bq, slot)) {
+		bq = rolling_buffer_delete_spent(&wreq->buffer);
+		if (!bq)
 			return;
 		slot = 0;
 	}
@@ -143,7 +143,7 @@ static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 		uoff_t fpos, fend;
 		size_t fsize, flen;
 
-		folio = folioq_folio(folioq, slot);
+		folio = bvec_folio(&bq->bv[slot]);
 		if (WARN_ONCE(!folio_test_writeback(folio),
 			      "R=%08x: folio %lx is not under writeback\n",
 			      wreq->debug_id, folio->index))
@@ -166,15 +166,15 @@ static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 		wreq->cleaned_to = fpos + fsize;
 		*notes |= MADE_PROGRESS;
 
-		/* Clean up the head folioq.  If we clear an entire folioq, then
-		 * we can get rid of it provided it's not also the tail folioq
+		/* Clean up the head bq.  If we clear an entire bq, then
+		 * we can get rid of it provided it's not also the tail bq
 		 * being filled by the issuer.
 		 */
-		folioq_clear(folioq, slot);
+		bq->bv[slot].bv_page = NULL;
 		slot++;
-		if (slot >= folioq_nr_slots(folioq)) {
-			folioq = rolling_buffer_delete_spent(&wreq->buffer);
-			if (!folioq)
+		while (!bvecq_acquire_slot(bq, slot)) {
+			bq = rolling_buffer_delete_spent(&wreq->buffer);
+			if (!bq)
 				goto done;
 			slot = 0;
 		}
@@ -183,7 +183,7 @@ static void netfs_writeback_unlock_folios(struct netfs_io_request *wreq,
 			break;
 	}
 
-	wreq->buffer.tail = folioq;
+	wreq->buffer.tail = bq;
 done:
 	wreq->buffer.first_tail_slot = slot;
 }
