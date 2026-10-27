@@ -3732,7 +3732,7 @@ static void gsmld_write_wakeup(struct tty_struct *tty)
 /**
  *	gsmld_read		-	read function for tty
  *	@tty: tty device
- *	@file: file object
+ *	@iocb: the read's kiocb
  *	@buf: userspace buffer pointer
  *	@nr: size of I/O
  *	@cookie: unused
@@ -3755,7 +3755,7 @@ static ssize_t gsmld_read(struct tty_struct *tty, struct kiocb *iocb,
 /**
  *	gsmld_write		-	write function for tty
  *	@tty: tty device
- *	@file: file object
+ *	@iocb: the write's kiocb
  *	@buf: userspace buffer pointer
  *	@nr: size of I/O
  *

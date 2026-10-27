@@ -1049,13 +1049,13 @@ ssize_t redirected_tty_write(struct kiocb *iocb, struct iov_iter *iter)
 
 	/*
 	 * We know the redirected tty is just another tty, we can
-	 * call file_tty_write() directly with that file pointer.
+	 * call file_tty_write() directly with a kiocb for that file.
 	 */
 	if (p) {
-		struct kiocb riocb = *iocb;
+		struct kiocb riocb;
 		ssize_t res;
 
-		riocb.ki_filp = p;
+		kiocb_clone(&riocb, iocb, p);
 		res = file_tty_write(&riocb, iter);
 		fput(p);
 		return res;
