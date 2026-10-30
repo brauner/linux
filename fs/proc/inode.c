@@ -219,6 +219,122 @@ static void pde_unpin(struct proc_dir_entry *pde)
 }
 
 /*
+ * procfs owns the seq_file of a seq_file entry and only calls into the entry
+ * with it pinned. A read copies to userspace without the pin, so a reader
+ * that faults on its buffer doesn't hold up remove_proc_entry().
+ *
+ * Like in kernfs_seq_start(), ERR_PTR(-EIO) means the entry isn't pinned. If
+ * the entry returns it itself, it is unpinned right away.
+ */
+static struct proc_dir_entry *seq_pde(struct seq_file *m)
+{
+	return PDE(file_inode(m->file));
+}
+
+static void pde_seq_stop_pinned(struct seq_file *m, void *v)
+{
+	struct proc_dir_entry *pde = seq_pde(m);
+
+	pde->seq_ops->stop(m, v);
+	pde_unpin(pde);
+}
+
+static void *pde_seq_start(struct seq_file *m, loff_t *pos)
+{
+	struct proc_dir_entry *pde = seq_pde(m);
+	void *v;
+
+	if (!pde_pin(pde))
+		return ERR_PTR(-EIO);
+	v = pde->seq_ops->start(m, pos);
+	if (v == ERR_PTR(-EIO))
+		pde_seq_stop_pinned(m, v);
+	return v;
+}
+
+static void *pde_seq_next(struct seq_file *m, void *v, loff_t *pos)
+{
+	v = seq_pde(m)->seq_ops->next(m, v, pos);
+	if (v == ERR_PTR(-EIO))
+		pde_seq_stop_pinned(m, v);
+	return v;
+}
+
+static void pde_seq_stop(struct seq_file *m, void *v)
+{
+	if (v != ERR_PTR(-EIO))
+		pde_seq_stop_pinned(m, v);
+}
+
+static int pde_seq_show(struct seq_file *m, void *v)
+{
+	return seq_pde(m)->seq_ops->show(m, v);
+}
+
+static const struct seq_operations pde_seq_ops = {
+	.start	= pde_seq_start,
+	.next	= pde_seq_next,
+	.stop	= pde_seq_stop,
+	.show	= pde_seq_show,
+};
+
+/* The same for entries that only have a ->proc_show(), like single_open(). */
+static void *pde_single_start(struct seq_file *m, loff_t *pos)
+{
+	if (!pde_pin(seq_pde(m)))
+		return ERR_PTR(-EIO);
+	return *pos ? NULL : SEQ_START_TOKEN;
+}
+
+static void *pde_single_next(struct seq_file *m, void *v, loff_t *pos)
+{
+	++*pos;
+	return NULL;
+}
+
+static void pde_single_stop(struct seq_file *m, void *v)
+{
+	if (v != ERR_PTR(-EIO))
+		pde_unpin(seq_pde(m));
+}
+
+static int pde_single_show(struct seq_file *m, void *v)
+{
+	return seq_pde(m)->single_show(m, v);
+}
+
+static const struct seq_operations pde_single_ops = {
+	.start	= pde_single_start,
+	.next	= pde_single_next,
+	.stop	= pde_single_stop,
+	.show	= pde_single_show,
+};
+
+static int pde_seq_open(struct proc_dir_entry *pde, struct file *file)
+{
+	int err;
+
+	if (pde_has_proc_show(pde)) {
+		err = seq_open(file, &pde_single_ops);
+		if (!err)
+			((struct seq_file *)file->private_data)->private = pde->data;
+		return err;
+	}
+	if (pde->state_size)
+		return seq_open_private(file, &pde_seq_ops, pde->state_size);
+	return seq_open(file, &pde_seq_ops);
+}
+
+static void pde_seq_release(struct proc_dir_entry *pde, struct inode *inode,
+			    struct file *file)
+{
+	if (pde->state_size)
+		seq_release_private(inode, file);
+	else
+		seq_release(inode, file);
+}
+
+/*
  * At most 2 contexts can enter this function: the one doing the last
  * close on the descriptor and whoever is deleting PDE itself.
  *
@@ -462,22 +578,35 @@ proc_reg_get_unmapped_area(struct file *file, unsigned long orig_addr,
 	return rv;
 }
 
+static int pde_open(struct proc_dir_entry *pde, struct inode *inode,
+		    struct file *file)
+{
+	const auto open = pde->proc_ops->proc_open;
+	int rv;
+
+	if (!pde_is_seq_file(pde))
+		return open ? open(inode, file) : 0;
+
+	rv = pde_seq_open(pde, file);
+	if (rv || !open)
+		return rv;
+	rv = open(inode, file);
+	if (rv)
+		pde_seq_release(pde, inode, file);
+	return rv;
+}
+
 static int proc_reg_open(struct inode *inode, struct file *file)
 {
 	struct proc_dir_entry *pde = PDE(inode);
 	int rv = 0;
-	typeof_member(struct proc_ops, proc_open) open;
 	struct pde_opener *pdeo;
 
 	if (!pde_has_proc_lseek(pde))
 		file->f_mode &= ~FMODE_LSEEK;
 
-	if (pde_is_permanent(pde)) {
-		open = pde->proc_ops->proc_open;
-		if (open)
-			rv = open(inode, file);
-		return rv;
-	}
+	if (pde_is_permanent(pde))
+		return pde_open(pde, inode, file);
 
 	/*
 	 * Ensure that
@@ -502,9 +631,7 @@ static int proc_reg_open(struct inode *inode, struct file *file)
 		}
 	}
 
-	open = pde->proc_ops->proc_open;
-	if (open)
-		rv = open(inode, file);
+	rv = pde_open(pde, inode, file);
 
 	if (release) {
 		if (rv == 0) {
@@ -532,20 +659,39 @@ static int proc_reg_release(struct inode *inode, struct file *file)
 	if (pde_is_permanent(pde)) {
 		const auto release = pde->proc_ops->proc_release;
 		if (release)
-			return release(inode, file);
-		return 0;
+			release(inode, file);
+		goto out;
 	}
 
 	spin_lock(&pde->pde_unload_lock);
 	list_for_each_entry(pdeo, &pde->pde_openers, lh) {
 		if (pdeo->file == file) {
 			close_pdeo(pde, pdeo);
-			return 0;
+			goto out;
 		}
 	}
 	spin_unlock(&pde->pde_unload_lock);
+out:
+	/* ->proc_release() has run, here or in remove_proc_entry() */
+	if (pde_is_seq_file(pde))
+		pde_seq_release(pde, inode, file);
 	return 0;
 }
+
+/* For seq_file entries, see pde_seq_ops. */
+static const struct file_operations proc_seq_file_ops = {
+	.llseek		= seq_lseek,
+	.read_iter	= seq_read_iter,
+	.splice_read	= copy_splice_read,
+	.write		= proc_reg_write,
+	.poll		= proc_reg_poll,
+	.unlocked_ioctl	= proc_reg_unlocked_ioctl,
+	.compat_ioctl	= proc_reg_compat_ioctl,
+	.mmap		= proc_reg_mmap,
+	.get_unmapped_area = proc_reg_get_unmapped_area,
+	.open		= proc_reg_open,
+	.release	= proc_reg_release,
+};
 
 static const struct file_operations proc_reg_file_ops = {
 	.llseek		= proc_reg_llseek,
@@ -624,7 +770,9 @@ struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 
 	if (S_ISREG(inode->i_mode)) {
 		inode->i_op = de->proc_iops;
-		if (pde_has_proc_read_iter(de))
+		if (pde_is_seq_file(de))
+			inode->i_fop = &proc_seq_file_ops;
+		else if (pde_has_proc_read_iter(de))
 			inode->i_fop = &proc_iter_file_ops;
 		else
 			inode->i_fop = &proc_reg_file_ops;
