@@ -33,5 +33,6 @@ TEST_GEN_PROGS += proc-pidns
 TEST_GEN_PROGS += proc-remove-slow-reader
 TEST_GEN_PROGS += proc-remove-slow-readlink
 TEST_GEN_PROGS += proc-remove-slow-writer
+TEST_GEN_PROGS += proc-remove-slow-config-reader
 
 include ../lib.mk

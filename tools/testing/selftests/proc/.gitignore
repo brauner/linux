@@ -23,6 +23,7 @@
 /proc-remove-slow-reader
 /proc-remove-slow-readlink
 /proc-remove-slow-writer
+/proc-remove-slow-config-reader
 /read
 /self
 /setns-dcache
