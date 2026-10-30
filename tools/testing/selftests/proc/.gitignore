@@ -22,6 +22,7 @@
 /proc-pidns
 /proc-remove-slow-reader
 /proc-remove-slow-readlink
+/proc-remove-slow-writer
 /read
 /self
 /setns-dcache

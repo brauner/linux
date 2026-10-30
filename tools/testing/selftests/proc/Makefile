@@ -32,5 +32,6 @@ TEST_GEN_PROGS += proc-fsconfig-hidepid
 TEST_GEN_PROGS += proc-pidns
 TEST_GEN_PROGS += proc-remove-slow-reader
 TEST_GEN_PROGS += proc-remove-slow-readlink
+TEST_GEN_PROGS += proc-remove-slow-writer
 
 include ../lib.mk
