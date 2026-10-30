@@ -9763,7 +9763,7 @@ static ssize_t scarlett2_devmap_read(
 	struct snd_info_entry *entry,
 	void                  *file_private_data,
 	struct file           *file,
-	char __user           *buf,
+	char                  *buf,
 	size_t                 count,
 	loff_t                 pos)
 {
@@ -9810,8 +9810,7 @@ static ssize_t scarlett2_devmap_read(
 		if (err < 0)
 			return copied ? copied : err;
 
-		if (copy_to_user(buf, resp_buf + offset, copy_size))
-			return -EFAULT;
+		memcpy(buf, resp_buf + offset, copy_size);
 
 		buf += copy_size;
 		pos += copy_size;
