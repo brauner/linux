@@ -234,7 +234,7 @@ static int simdisk_detach(struct simdisk *dev)
 	return err;
 }
 
-static ssize_t proc_read_simdisk(struct file *file, char __user *buf,
+static ssize_t proc_read_simdisk(struct file *file, char *buf,
 			size_t size, loff_t *ppos)
 {
 	struct simdisk *dev = pde_data(file_inode(file));
@@ -247,13 +247,13 @@ static ssize_t proc_read_simdisk(struct file *file, char __user *buf,
 			return -ENOMEM;
 
 		len = scnprintf(temp, len + 2, "%s\n", s);
-		len = simple_read_from_buffer(buf, size, ppos,
+		len = memory_read_from_buffer(buf, size, ppos,
 					      temp, len);
 
 		kfree(temp);
 		return len;
 	}
-	return simple_read_from_buffer(buf, size, ppos, "\n", 1);
+	return memory_read_from_buffer(buf, size, ppos, "\n", 1);
 }
 
 static ssize_t proc_write_simdisk(struct file *file, char *buf,
@@ -281,7 +281,7 @@ static ssize_t proc_write_simdisk(struct file *file, char *buf,
 }
 
 static const struct proc_ops simdisk_proc_ops = {
-	.proc_read	= proc_read_simdisk,
+	.proc_read_buf	= proc_read_simdisk,
 	.proc_write_buf	= proc_write_simdisk,
 	.proc_write_size = PAGE_SIZE,
 	.proc_lseek	= default_llseek,
