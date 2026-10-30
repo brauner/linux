@@ -410,6 +410,10 @@ static void pde_set_flags(struct proc_dir_entry *pde)
 		if (proc_ops->proc_flags & PROC_ENTRY_FULL_READS)
 			pde->flags |= PROC_ENTRY_FULL_READS;
 	}
+	if (proc_ops->proc_ioctl_buf) {
+		WARN_ON_ONCE(proc_ops->proc_ioctl);
+		pde->flags |= PROC_ENTRY_proc_ioctl_buf;
+	}
 }
 
 /* returns the registered entry, or frees dp and returns NULL on failure */
