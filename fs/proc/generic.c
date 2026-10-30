@@ -403,6 +403,13 @@ static void pde_set_flags(struct proc_dir_entry *pde)
 		if (proc_ops->proc_flags & PROC_ENTRY_SHORT_WRITES)
 			pde->flags |= PROC_ENTRY_SHORT_WRITES;
 	}
+	if (proc_ops->proc_read_buf) {
+		WARN_ON_ONCE(pde_is_seq_file(pde) || proc_ops->proc_read ||
+			     proc_ops->proc_read_iter);
+		pde->flags |= PROC_ENTRY_proc_read_buf;
+		if (proc_ops->proc_flags & PROC_ENTRY_FULL_READS)
+			pde->flags |= PROC_ENTRY_FULL_READS;
+	}
 }
 
 /* returns the registered entry, or frees dp and returns NULL on failure */
