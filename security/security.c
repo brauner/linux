@@ -3382,9 +3382,9 @@ int security_create_user_ns(const struct cred *cred)
  * security_namespace_init() - Initialize LSM security data for a namespace
  * @ns: the namespace being initialized
  *
- * Initialize the LSM security blob attached to the namespace. The namespace type
- * is available via ns->ns_type, and the owning user namespace (if any)
- * via ns->ops->owner(ns).
+ * Initialize the LSM security blob attached to the namespace. The namespace
+ * hasn't been set up yet but its type and id are available via ns->ns_type
+ * and ns->ns_id.
  *
  * Return: Returns 0 if successful, otherwise < 0 error code.
  */
@@ -3412,9 +3412,6 @@ int security_namespace_init(struct ns_common *ns)
  */
 void security_namespace_free(struct ns_common *ns)
 {
-	if (!ns->ns_security)
-		return;
-
 	call_void_hook(namespace_free, ns);
 
 	kfree(ns->ns_security);
