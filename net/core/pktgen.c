@@ -516,11 +516,9 @@ static int pgctrl_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static ssize_t pgctrl_write(struct file *file, const char __user *buf,
-			    size_t count, loff_t *ppos)
+static ssize_t pgctrl_write(struct file *file, char *buf, size_t count,
+			    loff_t *ppos)
 {
-	char data[128];
-	size_t max;
 	struct pktgen_net *pn = net_generic(current->nsproxy->net_ns, pg_net_id);
 
 	if (!capable(CAP_NET_ADMIN))
@@ -529,20 +527,15 @@ static ssize_t pgctrl_write(struct file *file, const char __user *buf,
 	if (count < 1)
 		return -EINVAL;
 
-	max = min(count, sizeof(data) - 1);
-	if (copy_from_user(data, buf, max))
-		return -EFAULT;
+	/* strip trailing '\n' */
+	if (buf[count - 1] == '\n')
+		buf[count - 1] = 0;
 
-	if (data[max - 1] == '\n')
-		data[max - 1] = 0; /* strip trailing '\n', terminate string */
-	else
-		data[max] = 0; /* terminate string */
-
-	if (!strcmp(data, "stop"))
+	if (!strcmp(buf, "stop"))
 		pktgen_stop_all_threads(pn);
-	else if (!strcmp(data, "start"))
+	else if (!strcmp(buf, "start"))
 		pktgen_run_all_threads(pn);
-	else if (!strcmp(data, "reset"))
+	else if (!strcmp(buf, "reset"))
 		pktgen_reset_all_threads(pn);
 	else
 		return -EINVAL;
@@ -552,7 +545,7 @@ static ssize_t pgctrl_write(struct file *file, const char __user *buf,
 
 static const struct proc_ops pktgen_proc_ops = {
 	.proc_show	= pgctrl_show,
-	.proc_write	= pgctrl_write,
+	.proc_write_buf	= pgctrl_write,
 };
 
 static int pktgen_if_show(struct seq_file *seq, void *v)
@@ -741,7 +734,7 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 }
 
 
-static ssize_t hex32_arg(const char __user *user_buffer, size_t maxlen,
+static ssize_t hex32_arg(const char *user_buffer, size_t maxlen,
 			 __u32 *num)
 {
 	size_t i = 0;
@@ -752,8 +745,7 @@ static ssize_t hex32_arg(const char __user *user_buffer, size_t maxlen,
 		int value;
 		char c;
 
-		if (get_user(c, &user_buffer[i]))
-			return -EFAULT;
+		c = user_buffer[i];
 		value = hex_to_bin(c);
 		if (value >= 0) {
 			*num <<= 4;
@@ -765,15 +757,14 @@ static ssize_t hex32_arg(const char __user *user_buffer, size_t maxlen,
 	return i;
 }
 
-static ssize_t count_trail_chars(const char __user *user_buffer, size_t maxlen)
+static ssize_t count_trail_chars(const char *user_buffer, size_t maxlen)
 {
 	size_t i;
 
 	for (i = 0; i < maxlen; i++) {
 		char c;
 
-		if (get_user(c, &user_buffer[i]))
-			return -EFAULT;
+		c = user_buffer[i];
 		switch (c) {
 		case '\"':
 		case '\n':
@@ -790,7 +781,7 @@ done:
 	return i;
 }
 
-static ssize_t num_arg(const char __user *user_buffer, size_t maxlen,
+static ssize_t num_arg(const char *user_buffer, size_t maxlen,
 		       unsigned long *num)
 {
 	size_t i;
@@ -799,8 +790,7 @@ static ssize_t num_arg(const char __user *user_buffer, size_t maxlen,
 	for (i = 0; i < maxlen; i++) {
 		char c;
 
-		if (get_user(c, &user_buffer[i]))
-			return -EFAULT;
+		c = user_buffer[i];
 		if ((c >= '0') && (c <= '9')) {
 			*num *= 10;
 			*num += c - '0';
@@ -810,15 +800,14 @@ static ssize_t num_arg(const char __user *user_buffer, size_t maxlen,
 	return i;
 }
 
-static ssize_t strn_len(const char __user *user_buffer, size_t maxlen)
+static ssize_t strn_len(const char *user_buffer, size_t maxlen)
 {
 	size_t i;
 
 	for (i = 0; i < maxlen; i++) {
 		char c;
 
-		if (get_user(c, &user_buffer[i]))
-			return -EFAULT;
+		c = user_buffer[i];
 		switch (c) {
 		case '\"':
 		case '\n':
@@ -840,7 +829,7 @@ done_str:
  * where each entry consists of size and weight delimited by commas.
  * "size1,weight_1 size2,weight_2 ... size_n,weight_n" for example.
  */
-static ssize_t get_imix_entries(const char __user *buffer,
+static ssize_t get_imix_entries(const char *buffer,
 				size_t maxlen,
 				struct pktgen_dev *pkt_dev)
 {
@@ -867,8 +856,7 @@ static ssize_t get_imix_entries(const char __user *buffer,
 		i += len;
 		if (i >= maxlen)
 			return -EINVAL;
-		if (get_user(c, &buffer[i]))
-			return -EFAULT;
+		c = buffer[i];
 		/* Check for comma between size_i and weight_i */
 		if (c != ',')
 			return -EINVAL;
@@ -894,15 +882,14 @@ static ssize_t get_imix_entries(const char __user *buffer,
 
 		if (i >= maxlen)
 			break;
-		if (get_user(c, &buffer[i]))
-			return -EFAULT;
+		c = buffer[i];
 		i++;
 	} while (c == ' ');
 
 	return i;
 }
 
-static ssize_t get_labels(const char __user *buffer,
+static ssize_t get_labels(const char *buffer,
 			  size_t maxlen, struct pktgen_dev *pkt_dev)
 {
 	unsigned int n = 0;
@@ -936,8 +923,7 @@ static ssize_t get_labels(const char __user *buffer,
 		n++;
 		if (i >= maxlen)
 			break;
-		if (get_user(c, &buffer[i]))
-			return -EFAULT;
+		c = buffer[i];
 		i++;
 	} while (c == ',');
 
@@ -974,9 +960,8 @@ static __u32 pktgen_read_flag(const char *f, bool *disable)
 	return 0;
 }
 
-static ssize_t pktgen_if_write(struct file *file,
-			       const char __user *user_buffer, size_t count,
-			       loff_t *offset)
+static ssize_t pktgen_if_write(struct file *file, char *user_buffer,
+			       size_t count, loff_t *offset)
 {
 	struct seq_file *seq = file->private_data;
 	struct pktgen_dev *pkt_dev = seq->private;
@@ -1009,8 +994,7 @@ static ssize_t pktgen_if_write(struct file *file,
 		return len;
 
 	memset(name, 0, sizeof(name));
-	if (copy_from_user(name, &user_buffer[i], len))
-		return -EFAULT;
+	memcpy(name, &user_buffer[i], len);
 	i += len;
 
 	max = count - i;
@@ -1020,16 +1004,9 @@ static ssize_t pktgen_if_write(struct file *file,
 
 	i += len;
 
-	if (debug) {
-		size_t copy = min_t(size_t, count + 1, 1024);
-		char *tp = strndup_user(user_buffer, copy);
-
-		if (IS_ERR(tp))
-			return PTR_ERR(tp);
-
-		pr_debug("%s,%zu  buffer -:%s:-\n", name, count, tp);
-		kfree(tp);
-	}
+	if (debug)
+		pr_debug("%s,%zu  buffer -:%.*s:-\n", name, count,
+			 (int)min_t(size_t, count, 1023), user_buffer);
 
 	if (!strcmp(name, "min_pkt_size")) {
 		max = min(10, count - i);
@@ -1322,8 +1299,7 @@ static ssize_t pktgen_if_write(struct file *file,
 			return len;
 
 		memset(f, 0, sizeof(f));
-		if (copy_from_user(f, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(f, &user_buffer[i], len);
 
 		if (strcmp(f, "start_xmit") == 0) {
 			pkt_dev->xmit_mode = M_START_XMIT;
@@ -1362,8 +1338,7 @@ static ssize_t pktgen_if_write(struct file *file,
 			return len;
 
 		memset(f, 0, 32);
-		if (copy_from_user(f, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(f, &user_buffer[i], len);
 
 		flag = pktgen_read_flag(f, &disable);
 		if (flag) {
@@ -1410,8 +1385,7 @@ static ssize_t pktgen_if_write(struct file *file,
 		if (len < 0)
 			return len;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 		if (strcmp(buf, pkt_dev->dst_min) != 0) {
 			strscpy_pad(pkt_dev->dst_min, buf);
@@ -1430,8 +1404,7 @@ static ssize_t pktgen_if_write(struct file *file,
 		if (len < 0)
 			return len;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 		if (strcmp(buf, pkt_dev->dst_max) != 0) {
 			strscpy_pad(pkt_dev->dst_max, buf);
@@ -1452,8 +1425,7 @@ static ssize_t pktgen_if_write(struct file *file,
 
 		pkt_dev->flags |= F_IPV6;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 
 		in6_pton(buf, -1, pkt_dev->in6_daddr.s6_addr, -1, NULL);
@@ -1475,8 +1447,7 @@ static ssize_t pktgen_if_write(struct file *file,
 
 		pkt_dev->flags |= F_IPV6;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 
 		in6_pton(buf, -1, pkt_dev->min_in6_daddr.s6_addr, -1, NULL);
@@ -1497,8 +1468,7 @@ static ssize_t pktgen_if_write(struct file *file,
 
 		pkt_dev->flags |= F_IPV6;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 
 		in6_pton(buf, -1, pkt_dev->max_in6_daddr.s6_addr, -1, NULL);
@@ -1518,8 +1488,7 @@ static ssize_t pktgen_if_write(struct file *file,
 
 		pkt_dev->flags |= F_IPV6;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 
 		in6_pton(buf, -1, pkt_dev->in6_saddr.s6_addr, -1, NULL);
@@ -1539,8 +1508,7 @@ static ssize_t pktgen_if_write(struct file *file,
 		if (len < 0)
 			return len;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 		if (strcmp(buf, pkt_dev->src_min) != 0) {
 			strscpy_pad(pkt_dev->src_min, buf);
@@ -1559,8 +1527,7 @@ static ssize_t pktgen_if_write(struct file *file,
 		if (len < 0)
 			return len;
 
-		if (copy_from_user(buf, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(buf, &user_buffer[i], len);
 		buf[len] = 0;
 		if (strcmp(buf, pkt_dev->src_max) != 0) {
 			strscpy_pad(pkt_dev->src_max, buf);
@@ -1580,8 +1547,7 @@ static ssize_t pktgen_if_write(struct file *file,
 			return len;
 
 		memset(valstr, 0, sizeof(valstr));
-		if (copy_from_user(valstr, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(valstr, &user_buffer[i], len);
 
 		if (!mac_pton(valstr, pkt_dev->dst_mac))
 			return -EINVAL;
@@ -1598,8 +1564,7 @@ static ssize_t pktgen_if_write(struct file *file,
 			return len;
 
 		memset(valstr, 0, sizeof(valstr));
-		if (copy_from_user(valstr, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(valstr, &user_buffer[i], len);
 
 		if (!mac_pton(valstr, pkt_dev->src_mac))
 			return -EINVAL;
@@ -1864,7 +1829,7 @@ static ssize_t pktgen_if_write(struct file *file,
 
 static const struct proc_ops pktgen_if_proc_ops = {
 	.proc_show	= pktgen_if_show,
-	.proc_write	= pktgen_if_write,
+	.proc_write_buf	= pktgen_if_write,
 };
 
 static int pktgen_thread_show(struct seq_file *seq, void *v)
@@ -1897,8 +1862,7 @@ static int pktgen_thread_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static ssize_t pktgen_thread_write(struct file *file,
-				   const char __user *user_buffer,
+static ssize_t pktgen_thread_write(struct file *file, char *user_buffer,
 				   size_t count, loff_t *offset)
 {
 	struct seq_file *seq = file->private_data;
@@ -1927,8 +1891,7 @@ static ssize_t pktgen_thread_write(struct file *file,
 		return len;
 
 	memset(name, 0, sizeof(name));
-	if (copy_from_user(name, &user_buffer[i], len))
-		return -EFAULT;
+	memcpy(name, &user_buffer[i], len);
 	i += len;
 
 	max = count - i;
@@ -1959,8 +1922,7 @@ static ssize_t pktgen_thread_write(struct file *file,
 			ret = len;
 			goto out;
 		}
-		if (copy_from_user(f, &user_buffer[i], len))
-			return -EFAULT;
+		memcpy(f, &user_buffer[i], len);
 
 		mutex_lock(&pktgen_thread_lock);
 		ret = pktgen_add_device(t, f);
@@ -1996,7 +1958,7 @@ out:
 
 static const struct proc_ops pktgen_thread_proc_ops = {
 	.proc_show	= pktgen_thread_show,
-	.proc_write	= pktgen_thread_write,
+	.proc_write_buf	= pktgen_thread_write,
 };
 
 /* Think find or remove for NN */
