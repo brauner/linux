@@ -21,6 +21,7 @@
 /proc-uptime-002
 /proc-pidns
 /proc-remove-slow-reader
+/proc-remove-slow-readlink
 /read
 /self
 /setns-dcache
