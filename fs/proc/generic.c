@@ -369,15 +369,19 @@ static const struct inode_operations proc_dir_inode_operations = {
 	.setattr	= proc_setattr,
 };
 
-static void pde_set_flags(struct proc_dir_entry *pde)
+static int pde_set_flags(struct proc_dir_entry *pde)
 {
 	const struct proc_ops *proc_ops = pde->proc_ops;
 
 	if (!proc_ops)
-		return;
+		return 0;
 
 	if (proc_ops->proc_flags & PROC_ENTRY_PERMANENT)
 		pde->flags |= PROC_ENTRY_PERMANENT;
+	/* These copy to userspace and only an entry that can't go away may. */
+	if (WARN_ON_ONCE((proc_ops->proc_read || proc_ops->proc_read_iter) &&
+			 !pde_is_permanent(pde)))
+		return -EINVAL;
 	if (proc_ops->proc_seq_ops) {
 		pde->seq_ops = proc_ops->proc_seq_ops;
 		pde->state_size = proc_ops->proc_state_size;
@@ -411,6 +415,7 @@ static void pde_set_flags(struct proc_dir_entry *pde)
 	}
 	if (proc_ops->proc_ioctl_buf)
 		pde->flags |= PROC_ENTRY_proc_ioctl_buf;
+	return 0;
 }
 
 /* returns the registered entry, or frees dp and returns NULL on failure */
@@ -420,8 +425,8 @@ struct proc_dir_entry *proc_register(struct proc_dir_entry *dir,
 	if (proc_alloc_inum(&dp->low_ino))
 		goto out_free_entry;
 
-	if (!S_ISDIR(dp->mode))
-		pde_set_flags(dp);
+	if (!S_ISDIR(dp->mode) && pde_set_flags(dp))
+		goto out_free_inum;
 
 	write_lock(&proc_subdir_lock);
 	dp->parent = dir;

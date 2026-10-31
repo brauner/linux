@@ -17,6 +17,8 @@ struct seq_operations;
 enum {
 	/*
 	 * All /proc entries using this ->proc_ops instance are never removed.
+	 * procfs calls into them without pinning them, so they may copy to
+	 * userspace themselves through ->proc_read() or ->proc_read_iter().
 	 *
 	 * If in doubt, ignore this flag.
 	 */
@@ -72,6 +74,10 @@ struct proc_ioctl_arg {
 struct proc_ops {
 	unsigned int proc_flags;
 	int	(*proc_open)(struct inode *, struct file *);
+	/*
+	 * These two are only for PROC_ENTRY_PERMANENT entries. Everything else
+	 * uses ->proc_read_buf().
+	 */
 	ssize_t	(*proc_read)(struct file *, char __user *, size_t, loff_t *);
 	ssize_t (*proc_read_iter)(struct kiocb *, struct iov_iter *);
 	/*
