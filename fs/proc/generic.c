@@ -398,7 +398,6 @@ static void pde_set_flags(struct proc_dir_entry *pde)
 			pde->flags |= PROC_ENTRY_proc_lseek;
 	}
 	if (proc_ops->proc_write_buf) {
-		WARN_ON_ONCE(proc_ops->proc_write);
 		pde->flags |= PROC_ENTRY_proc_write_buf;
 		if (proc_ops->proc_flags & PROC_ENTRY_SHORT_WRITES)
 			pde->flags |= PROC_ENTRY_SHORT_WRITES;
