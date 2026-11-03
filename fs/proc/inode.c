@@ -546,7 +546,7 @@ static __poll_t proc_reg_poll(struct file *file, struct poll_table_struct *pts)
 	poll_wait(file, &pde->open->poll, pts);
 	if (!pde_pin(pde))
 		return DEFAULT_POLLMASK | EPOLLERR | EPOLLPRI;
-	rv = pde->proc_ops->proc_poll(file, pts);
+	rv = pde->proc_ops->proc_poll(file);
 	pde_unpin(pde);
 	return rv;
 }

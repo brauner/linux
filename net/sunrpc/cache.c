@@ -1589,7 +1589,7 @@ static ssize_t cache_write_procfs(struct file *filp, char *buf, size_t count,
 	return ret ? ret : count;
 }
 
-static __poll_t cache_poll_procfs(struct file *filp, poll_table *wait)
+static __poll_t cache_poll_procfs(struct file *filp)
 {
 	struct cache_detail *cd = pde_data(file_inode(filp));
 

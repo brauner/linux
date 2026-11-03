@@ -3315,7 +3315,7 @@ out_dput:
 }
 
 #ifdef CONFIG_PROC_FS
-static __poll_t swaps_poll(struct file *file, poll_table *wait)
+static __poll_t swaps_poll(struct file *file)
 {
 	struct seq_file *seq = file->private_data;
 

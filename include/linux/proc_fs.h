@@ -84,11 +84,12 @@ struct proc_ops {
 	int	(*proc_release)(struct inode *, struct file *);
 	/*
 	 * procfs owns a wait queue for an entry with a ->proc_poll() and
-	 * does the poll_wait() on it before it calls the method. The owner
-	 * wakes the pollers with proc_poll_notify(). A poll on a removed
-	 * entry reports EPOLLERR | EPOLLPRI.
+	 * does the poll_wait() on it before it calls the method, which only
+	 * reports the mask. The owner wakes the pollers with
+	 * proc_poll_notify(). A poll on a removed entry reports
+	 * EPOLLERR | EPOLLPRI.
 	 */
-	__poll_t (*proc_poll)(struct file *, struct poll_table_struct *);
+	__poll_t (*proc_poll)(struct file *);
 	/*
 	 * procfs pins the entry around ->proc_mmap() and wraps the
 	 * vm_operations of the mapping so that ->open(), ->fault(),

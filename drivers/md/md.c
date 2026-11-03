@@ -9183,7 +9183,7 @@ static int md_seq_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static __poll_t mdstat_poll(struct file *filp, poll_table *wait)
+static __poll_t mdstat_poll(struct file *filp)
 {
 	struct seq_file *seq = filp->private_data;
 	__poll_t mask;
