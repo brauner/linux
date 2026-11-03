@@ -31,5 +31,6 @@
 /self
 /setns-dcache
 /setns-sysvipc
+/proc-remove-polled
 /proc-sysctl-readdir-churn
 /thread-self
