@@ -27,6 +27,7 @@ enum {
 #endif
 
 	PROC_ENTRY_proc_read_iter	= 1U << 1,
+	PROC_ENTRY_proc_fops		= 1U << 2,
 	PROC_ENTRY_proc_lseek		= 1U << 3,
 	PROC_ENTRY_proc_seq_ops		= 1U << 4,
 	PROC_ENTRY_proc_show		= 1U << 5,

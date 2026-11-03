@@ -41,6 +41,8 @@ struct proc_dir_entry {
 	union {
 		const struct proc_ops *proc_ops;
 		const struct file_operations *proc_dir_ops;
+		/* of a permanent entry procfs doesn't mediate, see proc_create_fops() */
+		const struct file_operations *proc_fops;
 	};
 	union {
 		const struct seq_operations *seq_ops;
@@ -94,6 +96,11 @@ static inline void pde_make_permanent(struct proc_dir_entry *pde)
 	/* Ensure magic flag does something. */
 	static_assert(PROC_ENTRY_PERMANENT != 0);
 	pde->flags |= PROC_ENTRY_PERMANENT;
+}
+
+static inline bool pde_has_proc_fops(const struct proc_dir_entry *pde)
+{
+	return pde->flags & PROC_ENTRY_proc_fops;
 }
 
 static inline bool pde_has_proc_read_iter(const struct proc_dir_entry *pde)
@@ -352,6 +359,9 @@ bool proc_fill_cache(struct file *, struct dir_context *, const char *, unsigned
  */
 struct proc_dir_entry *proc_create_reg(const char *name, umode_t mode,
 		struct proc_dir_entry **parent, void *data);
+struct proc_dir_entry *proc_create_fops(const char *name, umode_t mode,
+		struct proc_dir_entry *parent,
+		const struct file_operations *fops);
 struct proc_dir_entry *proc_register(struct proc_dir_entry *dir,
 		struct proc_dir_entry *dp,
 		struct lock_class_key *key);

@@ -130,10 +130,9 @@ static ssize_t kpagecount_read(struct file *file, char __user *buf,
 	return kpage_read(file, buf, count, ppos, KPAGE_COUNT);
 }
 
-static const struct proc_ops kpagecount_proc_ops = {
-	.proc_flags	= PROC_ENTRY_PERMANENT,
-	.proc_lseek	= mem_lseek,
-	.proc_read	= kpagecount_read,
+static const struct file_operations kpagecount_fops = {
+	.llseek		= mem_lseek,
+	.read		= kpagecount_read,
 };
 
 
@@ -256,10 +255,9 @@ static ssize_t kpageflags_read(struct file *file, char __user *buf,
 	return kpage_read(file, buf, count, ppos, KPAGE_FLAGS);
 }
 
-static const struct proc_ops kpageflags_proc_ops = {
-	.proc_flags	= PROC_ENTRY_PERMANENT,
-	.proc_lseek	= mem_lseek,
-	.proc_read	= kpageflags_read,
+static const struct file_operations kpageflags_fops = {
+	.llseek		= mem_lseek,
+	.read		= kpageflags_read,
 };
 
 #ifdef CONFIG_MEMCG
@@ -268,19 +266,18 @@ static ssize_t kpagecgroup_read(struct file *file, char __user *buf,
 {
 	return kpage_read(file, buf, count, ppos, KPAGE_CGROUP);
 }
-static const struct proc_ops kpagecgroup_proc_ops = {
-	.proc_flags	= PROC_ENTRY_PERMANENT,
-	.proc_lseek	= mem_lseek,
-	.proc_read	= kpagecgroup_read,
+static const struct file_operations kpagecgroup_fops = {
+	.llseek		= mem_lseek,
+	.read		= kpagecgroup_read,
 };
 #endif /* CONFIG_MEMCG */
 
 static int __init proc_page_init(void)
 {
-	proc_create("kpagecount", S_IRUSR, NULL, &kpagecount_proc_ops);
-	proc_create("kpageflags", S_IRUSR, NULL, &kpageflags_proc_ops);
+	proc_create_fops("kpagecount", S_IRUSR, NULL, &kpagecount_fops);
+	proc_create_fops("kpageflags", S_IRUSR, NULL, &kpageflags_fops);
 #ifdef CONFIG_MEMCG
-	proc_create("kpagecgroup", S_IRUSR, NULL, &kpagecgroup_proc_ops);
+	proc_create_fops("kpagecgroup", S_IRUSR, NULL, &kpagecgroup_fops);
 #endif
 	return 0;
 }
