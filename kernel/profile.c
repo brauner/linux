@@ -142,7 +142,6 @@ void profile_tick(int type)
 #ifdef CONFIG_PROC_FS
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <linux/uaccess.h>
 
 /*
  * This function accesses profiling information. The returned data is
@@ -151,7 +150,7 @@ void profile_tick(int type)
  * get meaningful info out of these data.
  */
 static ssize_t
-read_profile(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+read_profile(struct file *file, char *buf, size_t count, loff_t *ppos)
 {
 	unsigned long p = *ppos;
 	ssize_t read;
@@ -165,13 +164,11 @@ read_profile(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 	read = 0;
 
 	while (p < sizeof(unsigned int) && count > 0) {
-		if (put_user(*((char *)(&sample_step)+p), buf))
-			return -EFAULT;
+		*buf = *((char *)(&sample_step)+p);
 		buf++; p++; count--; read++;
 	}
 	pnt = (char *)prof_buffer + p - sizeof(atomic_t);
-	if (copy_to_user(buf, (void *)pnt, count))
-		return -EFAULT;
+	memcpy(buf, pnt, count);
 	read += count;
 	*ppos += read;
 	return read;
@@ -206,7 +203,8 @@ static ssize_t write_profile(struct file *file, char *buf, size_t count,
 }
 
 static const struct proc_ops profile_proc_ops = {
-	.proc_read	= read_profile,
+	.proc_flags	= PROC_ENTRY_FULL_READS,
+	.proc_read_buf	= read_profile,
 	.proc_write_buf	= write_profile,
 	.proc_lseek	= default_llseek,
 };
