@@ -1,0 +1,355 @@
+commit 69ff66ff54ce890285b3fd929a6e2213f6553ff0
+Author: Christian Brauner <brauner@kernel.org>
+Date:   Tue Nov 10 12:09:26 2026 +0100
+
+    fixup! vfs: add O_CREAT|O_DIRECTORY to open*(2)
+
+    kernfs doesn't need the kernfs_syscall_ops change. The parent's i_rwsem
+    is held across ->mkdir(), so once scops->mkdir() has returned the new
+    node can be looked up by name under kernfs_rwsem, which is what the
+    next ->lookup() would have done anyway. This leaves cgroup, resctrl and
+    the kernfs_syscall_ops API untouched.
+
+    While at it, drop the unused @lookup argument and the ->set() callback
+    from kernfs_get_inode_locked(). Setting i_ino before inode_insert5() is
+    enough.
+
+    Signed-off-by: Christian Brauner (Amutable) <brauner@kernel.org>
+
+diff --git a/fs/kernfs/dir.c b/fs/kernfs/dir.c
+index abb6b0d212142..e72783843edbc 100644
+--- a/fs/kernfs/dir.c
++++ b/fs/kernfs/dir.c
+@@ -1292,13 +1292,17 @@ static struct dentry *kernfs_iop_mkdir(const struct mnt_idmap *idmap,
+ 				       umode_t mode)
+ {
+ 	struct kernfs_node *parent = dir->i_private;
+-	struct kernfs_syscall_ops *scops = kernfs_root(parent)->syscall_ops;
++	struct kernfs_root *root = kernfs_root(parent);
++	struct kernfs_syscall_ops *scops = root->syscall_ops;
++	const struct ns_common *ns = NULL;
+ 	struct kernfs_node *kn;
+ 	struct inode *inode;
++	int ret;
+
+ 	if (!scops || !scops->mkdir)
+ 		return ERR_PTR(-EOPNOTSUPP);
+
++	/* allocated up front so that we never fail after creating the node */
+ 	inode = new_inode(dir->i_sb);
+ 	if (!inode)
+ 		return ERR_PTR(-ENOMEM);
+@@ -1308,18 +1312,31 @@ static struct dentry *kernfs_iop_mkdir(const struct mnt_idmap *idmap,
+ 		return ERR_PTR(-ENODEV);
+ 	}
+
+-	kn = scops->mkdir(parent, dentry->d_name.name, mode);
++	ret = scops->mkdir(parent, dentry->d_name.name, mode);
+
+ 	kernfs_put_active(parent);
+-	if (IS_ERR(kn)) {
++	if (ret) {
+ 		iput(inode);
+-		return ERR_CAST(kn);
++		return ERR_PTR(ret);
+ 	}
+
+-	scoped_guard(rwsem_read, &kernfs_root(kn)->kernfs_rwsem)
+-		inode = kernfs_get_inode_locked(inode, kn, false);
+-	kernfs_put(kn);
+-
++	/*
++	 * Find the node that ->mkdir() created.  The parent's i_rwsem is
++	 * held, so only a removal from inside the kernel can make it go
++	 * away again, and then the open fails like one of a removed
++	 * directory.
++	 */
++	scoped_guard(rwsem_read, &root->kernfs_rwsem) {
++		if (kernfs_ns_enabled(parent))
++			ns = kernfs_info(dir->i_sb)->ns;
++		kn = kernfs_find_ns(parent, dentry->d_name.name, ns);
++		if (kn) {
++			inode = kernfs_get_inode_locked(inode, kn);
++		} else {
++			iput(inode);
++			inode = NULL;
++		}
++	}
+ 	if (!inode)
+ 		return ERR_PTR(-ESTALE);
+
+diff --git a/fs/kernfs/inode.c b/fs/kernfs/inode.c
+index 0da4e46ec75bf..9cc1a56740b98 100644
+--- a/fs/kernfs/inode.c
++++ b/fs/kernfs/inode.c
+@@ -260,56 +260,40 @@ static int kernfs_inode_test(struct inode *inode, void *data)
+ 	return inode->i_ino == *(u64 *)data;
+ }
+
+-static int kernfs_inode_set(struct inode *inode, void *data)
+-{
+-	inode->i_ino = *(u64 *)data;
+-	return 0;
+-}
+-
+ /**
+- * kernfs_get_inode_locked - get the inode of @kn under kernfs_rwsem
++ * kernfs_get_inode_locked - attach a preallocated inode to @kn
+  * @inode: inode allocated with new_inode() on the target superblock
+  * @kn: kernfs_node to get the inode for
+- * @lookup: should we do a ilookup before attempting to insert the inode
+  *
+- * Attaches @inode to @kn. Caller should pass an @inode allocated with
+- * new_inode(), and hold the kernfs_rwsem semaphore for reading on the @kn
+- * root. Because the kernfs_rwsem is held and it is checked that @kn is still
+- * active, __kernfs_remove() always finds @inode to clear its i_nlink. If
+- * lookup is true, a quick ilookup is attempted first.
++ * The caller holds kernfs_rwsem for reading, so @kn cannot be removed
++ * while the inode is inserted and __kernfs_remove() always finds it to
++ * clear its i_nlink.  @inode is consumed.
+  *
+- * Returns the inode that was found or inserted for @kn, or NULL if @kn is
+- * inactive. @inode is consumed.
++ * Returns the inode now attached to @kn, which is @inode unless one was
++ * already hashed for it (e.g. by a file handle decode), or NULL if @kn
++ * is no longer active.
+  */
+-struct inode *kernfs_get_inode_locked(struct inode *inode, struct kernfs_node *kn,
+-				      bool lookup)
++struct inode *kernfs_get_inode_locked(struct inode *inode,
++				      struct kernfs_node *kn)
+ {
+ 	u64 ino = kernfs_ino(kn);
+-	struct inode *old = NULL, *new = inode;
++	struct inode *res = NULL;
+
+ 	lockdep_assert_held_read(&kernfs_root(kn)->kernfs_rwsem);
+
+-	if (lookup) {
+-		old = ilookup(inode->i_sb, ino);
+-		if (old)
+-			goto out_iput;
+-	}
+-
+ 	if (!kernfs_active(kn))
+ 		goto out_iput;
+
+-	inode = inode_insert5(new, ino, kernfs_inode_test, kernfs_inode_set,
+-			      &ino);
+-	if (inode != new) {
+-		old = inode;
++	inode->i_ino = ino;
++	res = inode_insert5(inode, ino, kernfs_inode_test, NULL, &ino);
++	if (res != inode)
+ 		goto out_iput;
+-	}
+
+ 	kernfs_init_inode(kn, inode);
+ 	return inode;
+ out_iput:
+-	iput(new);
+-	return old;
++	iput(inode);
++	return res;
+ }
+
+ /*
+diff --git a/fs/kernfs/kernfs-internal.h b/fs/kernfs/kernfs-internal.h
+index ec6e1f75513ba..2e364b626c1e5 100644
+--- a/fs/kernfs/kernfs-internal.h
++++ b/fs/kernfs/kernfs-internal.h
+@@ -177,8 +177,7 @@ extern struct kmem_cache *kernfs_node_cache, *kernfs_iattrs_cache;
+  */
+ extern const struct xattr_handler * const kernfs_xattr_handlers[];
+ struct inode *kernfs_get_inode_locked(struct inode *inode,
+-				      struct kernfs_node *kn,
+-				      bool lookup);
++				      struct kernfs_node *kn);
+ void kernfs_evict_inode(struct inode *inode);
+ int kernfs_iop_permission(const struct mnt_idmap *idmap,
+ 			  struct inode *inode, int mask);
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index be151cc8fd29c..57ab090072c21 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -4040,16 +4040,15 @@ static void mkdir_rdt_prepare_clean(struct rdtgroup *rgrp)
+  * and monitor group(ctrl_mon). This is a resource group
+  * to monitor a subset of tasks and cpus in its parent ctrl_mon group.
+  */
+-static struct kernfs_node *rdtgroup_mkdir_mon(struct kernfs_node *parent_kn,
+-					      const char *name, umode_t mode)
++static int rdtgroup_mkdir_mon(struct kernfs_node *parent_kn,
++			      const char *name, umode_t mode)
+ {
+ 	struct rdtgroup *rdtgrp, *prgrp;
+-	struct kernfs_node *kn;
+ 	int ret;
+
+ 	ret = mkdir_rdt_prepare(parent_kn, name, mode, RDTMON_GROUP, &rdtgrp);
+ 	if (ret)
+-		return ERR_PTR(ret);
++		return ret;
+
+ 	prgrp = rdtgrp->mon.parent;
+ 	rdtgrp->closid = prgrp->closid;
+@@ -4068,22 +4067,17 @@ static struct kernfs_node *rdtgroup_mkdir_mon(struct kernfs_node *parent_kn,
+ 	 */
+ 	list_add_tail(&rdtgrp->mon.crdtgrp_list, &prgrp->mon.crdtgrp_list);
+
+-	kn = rdtgrp->kn;
+-	kernfs_get(kn);
+-	rdtgroup_kn_unlock(parent_kn);
+-	return kn;
+-
+ out_unlock:
+ 	rdtgroup_kn_unlock(parent_kn);
+-	return ERR_PTR(ret);
++	return ret;
+ }
+
+ /*
+  * These are rdtgroups created under the root directory. Can be used
+  * to allocate and monitor resources.
+  */
+-static struct kernfs_node *rdtgroup_mkdir_ctrl_mon(struct kernfs_node *parent_kn,
+-						   const char *name, umode_t mode)
++static int rdtgroup_mkdir_ctrl_mon(struct kernfs_node *parent_kn,
++				   const char *name, umode_t mode)
+ {
+ 	struct rdtgroup *rdtgrp;
+ 	struct kernfs_node *kn;
+@@ -4092,7 +4086,7 @@ static struct kernfs_node *rdtgroup_mkdir_ctrl_mon(struct kernfs_node *parent_kn
+
+ 	ret = mkdir_rdt_prepare(parent_kn, name, mode, RDTCTRL_GROUP, &rdtgrp);
+ 	if (ret)
+-		return ERR_PTR(ret);
++		return ret;
+
+ 	kn = rdtgrp->kn;
+ 	ret = closid_alloc();
+@@ -4131,9 +4125,7 @@ static struct kernfs_node *rdtgroup_mkdir_ctrl_mon(struct kernfs_node *parent_kn
+ 			rdtgrp->mba_mbps_event = mba_mbps_default_event;
+ 	}
+
+-	kernfs_get(kn);
+-	rdtgroup_kn_unlock(parent_kn);
+-	return kn;
++	goto out_unlock;
+
+ out_del_list:
+ 	list_del(&rdtgrp->rdtgroup_list);
+@@ -4143,16 +4135,17 @@ static struct kernfs_node *rdtgroup_mkdir_ctrl_mon(struct kernfs_node *parent_kn
+ 	closid_free(closid);
+ out_common_fail:
+ 	mkdir_rdt_prepare_clean(rdtgrp);
++out_unlock:
+ 	rdtgroup_kn_unlock(parent_kn);
+-	return ERR_PTR(ret);
++	return ret;
+ }
+
+-static struct kernfs_node *rdtgroup_mkdir(struct kernfs_node *parent_kn,
+-					  const char *name, umode_t mode)
++static int rdtgroup_mkdir(struct kernfs_node *parent_kn, const char *name,
++			  umode_t mode)
+ {
+ 	/* Do not accept '\n' to avoid unparsable situation. */
+ 	if (strchr(name, '\n'))
+-		return ERR_PTR(-EINVAL);
++		return -EINVAL;
+
+ 	/*
+ 	 * If the parent directory is the root directory and RDT
+@@ -4166,7 +4159,7 @@ static struct kernfs_node *rdtgroup_mkdir(struct kernfs_node *parent_kn,
+ 	if (resctrl_arch_mon_capable())
+ 		return rdtgroup_mkdir_mon(parent_kn, name, mode);
+
+-	return ERR_PTR(-EPERM);
++	return -EPERM;
+ }
+
+ static int rdtgroup_rmdir_mon(struct rdtgroup *rdtgrp, cpumask_var_t tmpmask)
+diff --git a/include/linux/kernfs.h b/include/linux/kernfs.h
+index 2a7baa6a56bc0..73786b567ccd8 100644
+--- a/include/linux/kernfs.h
++++ b/include/linux/kernfs.h
+@@ -241,14 +241,13 @@ struct kernfs_node {
+  * syscalls.  These optional callbacks are invoked on the matching syscalls
+  * and can perform any kernfs operations which don't necessarily have to be
+  * the exact operation requested.  An active reference is held for each
+- * kernfs_node parameter.  @mkdir returns the kernfs_node of the new
+- * directory with a reference held, or an ERR_PTR() on failure.
++ * kernfs_node parameter.
+  */
+ struct kernfs_syscall_ops {
+ 	int (*show_options)(struct seq_file *sf, struct kernfs_root *root);
+
+-	struct kernfs_node *(*mkdir)(struct kernfs_node *parent,
+-				     const char *name, umode_t mode);
++	int (*mkdir)(struct kernfs_node *parent, const char *name,
++		     umode_t mode);
+ 	int (*rmdir)(struct kernfs_node *kn);
+ 	int (*rename)(struct kernfs_node *kn, struct kernfs_node *new_parent,
+ 		      const char *new_name);
+diff --git a/kernel/cgroup/cgroup-internal.h b/kernel/cgroup/cgroup-internal.h
+index 5d05fd75d0c04..233fb8b45d2c3 100644
+--- a/kernel/cgroup/cgroup-internal.h
++++ b/kernel/cgroup/cgroup-internal.h
+@@ -256,8 +256,7 @@ void cgroup_procs_write_finish(struct task_struct *task,
+
+ int cgroup_lock_and_drain_offline(struct cgroup *cgrp);
+
+-struct kernfs_node *cgroup_mkdir(struct kernfs_node *parent_kn, const char *name,
+-				 umode_t mode);
++int cgroup_mkdir(struct kernfs_node *parent_kn, const char *name, umode_t mode);
+ int cgroup_rmdir(struct kernfs_node *kn);
+ int cgroup_show_path(struct seq_file *sf, struct kernfs_node *kf_node,
+ 		     struct kernfs_root *kf_root);
+diff --git a/kernel/cgroup/cgroup.c b/kernel/cgroup/cgroup.c
+index c3abbe0a3a7fd..a284225f8dc95 100644
+--- a/kernel/cgroup/cgroup.c
++++ b/kernel/cgroup/cgroup.c
+@@ -6149,20 +6149,18 @@ static bool cgroup_check_hierarchy_limits(struct cgroup *parent)
+ 	return ret;
+ }
+
+-struct kernfs_node *cgroup_mkdir(struct kernfs_node *parent_kn, const char *name,
+-				 umode_t mode)
++int cgroup_mkdir(struct kernfs_node *parent_kn, const char *name, umode_t mode)
+ {
+ 	struct cgroup *parent, *cgrp;
+-	struct kernfs_node *kn;
+ 	int ret;
+
+ 	/* do not accept '\n' to prevent making /proc/<pid>/cgroup unparsable */
+ 	if (strchr(name, '\n'))
+-		return ERR_PTR(-EINVAL);
++		return -EINVAL;
+
+ 	parent = cgroup_kn_lock_live(parent_kn, false);
+ 	if (IS_ERR(parent))
+-		return ERR_CAST(parent);
++		return PTR_ERR(parent);
+
+ 	if (!cgroup_check_hierarchy_limits(parent)) {
+ 		ret = -EAGAIN;
+@@ -6194,16 +6192,14 @@ struct kernfs_node *cgroup_mkdir(struct kernfs_node *parent_kn, const char *name
+ 	/* let's create and online css's */
+ 	kernfs_activate(cgrp->kn);
+
+-	kn = cgrp->kn;
+-	kernfs_get(kn);
+-	cgroup_kn_unlock(parent_kn);
+-	return kn;
++	ret = 0;
++	goto out_unlock;
+
+ out_destroy:
+ 	cgroup_destroy_locked(cgrp);
+ out_unlock:
+ 	cgroup_kn_unlock(parent_kn);
+-	return ERR_PTR(ret);
++	return ret;
+ }
+
+ /*

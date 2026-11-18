@@ -1,0 +1,22 @@
+commit ecdfc51a6a78aaf1c4ac1d8b6ea199cc2ed020ac
+Author: Christian Brauner <brauner@kernel.org>
+Date:   Tue Nov 10 12:09:30 2026 +0100
+
+    fixup! selftest: add tests for open*(O_CREAT|O_DIRECTORY)
+
+    Drop the trailing whitespace in the Makefile.
+
+    Signed-off-by: Christian Brauner (Amutable) <brauner@kernel.org>
+
+diff --git a/tools/testing/selftests/filesystems/Makefile b/tools/testing/selftests/filesystems/Makefile
+index 004b946fd2e0b..01f92601a36bc 100644
+--- a/tools/testing/selftests/filesystems/Makefile
++++ b/tools/testing/selftests/filesystems/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+
+ CFLAGS += $(KHDR_INCLUDES)
+-TEST_GEN_PROGS := devpts_pts anon_inode_test kernfs_test fclog ustat_test rw_hint_test open_o_creat_o_dir
++TEST_GEN_PROGS := devpts_pts anon_inode_test kernfs_test fclog ustat_test rw_hint_test open_o_creat_o_dir
+ TEST_GEN_PROGS += idmapped_tmpfile
+ TEST_GEN_PROGS_EXTENDED := dnotify_test

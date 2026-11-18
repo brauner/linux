@@ -1,0 +1,133 @@
+commit 729fe2a783597ba706bbd994cc784071ef153946
+Author: Christian Brauner <brauner@kernel.org>
+Date:   Tue Nov 10 12:09:28 2026 +0100
+
+    fixup! vfs: change ->create/->mkdir operations unavailable errno
+
+    The check lives in the two helpers now. Drop the comment changes to
+    the uapi errno.h headers. They don't change what userspace sees, the
+    strerror() text comes from libc, and they would need the alpha, mips,
+    parisc and sparc maintainers.
+
+    Signed-off-by: Christian Brauner (Amutable) <brauner@kernel.org>
+
+diff --git a/arch/alpha/include/uapi/asm/errno.h b/arch/alpha/include/uapi/asm/errno.h
+index 0384f69989748..1a99f38813c79 100644
+--- a/arch/alpha/include/uapi/asm/errno.h
++++ b/arch/alpha/include/uapi/asm/errno.h
+@@ -19,7 +19,7 @@
+ #define	ENOPROTOOPT	42	/* Protocol not available */
+ #define	EPROTONOSUPPORT	43	/* Protocol not supported */
+ #define	ESOCKTNOSUPPORT	44	/* Socket type not supported */
+-#define	EOPNOTSUPP	45	/* Operation not supported */
++#define	EOPNOTSUPP	45	/* Operation not supported on transport endpoint */
+ #define	EPFNOSUPPORT	46	/* Protocol family not supported */
+ #define	EAFNOSUPPORT	47	/* Address family not supported by protocol */
+ #define	EADDRINUSE	48	/* Address already in use */
+diff --git a/arch/mips/include/uapi/asm/errno.h b/arch/mips/include/uapi/asm/errno.h
+index 2b6813715d1e5..1835a50b69cef 100644
+--- a/arch/mips/include/uapi/asm/errno.h
++++ b/arch/mips/include/uapi/asm/errno.h
+@@ -75,7 +75,7 @@
+ #define ENOPROTOOPT	99	/* Protocol not available */
+ #define EPROTONOSUPPORT 120	/* Protocol not supported */
+ #define ESOCKTNOSUPPORT 121	/* Socket type not supported */
+-#define EOPNOTSUPP	122	/* Operation not supported */
++#define EOPNOTSUPP	122	/* Operation not supported on transport endpoint */
+ #define EPFNOSUPPORT	123	/* Protocol family not supported */
+ #define EAFNOSUPPORT	124	/* Address family not supported by protocol */
+ #define EADDRINUSE	125	/* Address already in use */
+diff --git a/arch/parisc/include/uapi/asm/errno.h b/arch/parisc/include/uapi/asm/errno.h
+index 74bd65d791457..93194fbb0a80d 100644
+--- a/arch/parisc/include/uapi/asm/errno.h
++++ b/arch/parisc/include/uapi/asm/errno.h
+@@ -84,7 +84,7 @@
+ #define	ENOPROTOOPT	220	/* Protocol not available */
+ #define	EPROTONOSUPPORT	221	/* Protocol not supported */
+ #define	ESOCKTNOSUPPORT	222	/* Socket type not supported */
+-#define	EOPNOTSUPP	223	/* Operation not supported */
++#define	EOPNOTSUPP	223	/* Operation not supported on transport endpoint */
+ #define	EPFNOSUPPORT	224	/* Protocol family not supported */
+ #define	EAFNOSUPPORT	225	/* Address family not supported by protocol */
+ #define	EADDRINUSE	226	/* Address already in use */
+diff --git a/arch/sparc/include/uapi/asm/errno.h b/arch/sparc/include/uapi/asm/errno.h
+index 699f648e1a356..71940ec9130b4 100644
+--- a/arch/sparc/include/uapi/asm/errno.h
++++ b/arch/sparc/include/uapi/asm/errno.h
+@@ -16,7 +16,7 @@
+ #define	ENOPROTOOPT	42	/* Protocol not available */
+ #define	EPROTONOSUPPORT	43	/* Protocol not supported */
+ #define	ESOCKTNOSUPPORT	44	/* Socket type not supported */
+-#define	EOPNOTSUPP	45	/* Operation not supported */
++#define	EOPNOTSUPP	45	/* Op not supported on transport endpoint */
+ #define	EPFNOSUPPORT	46	/* Protocol family not supported */
+ #define	EAFNOSUPPORT	47	/* Address family not supported by protocol */
+ #define	EADDRINUSE	48	/* Address already in use */
+diff --git a/fs/namei.c b/fs/namei.c
+index a67ffc09d36a0..5a83e2273f529 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -4195,7 +4195,7 @@ int vfs_create_no_perm(const struct mnt_idmap *idmap, struct inode *dir,
+ 	int error;
+
+ 	if (!dir->i_op->create)
+-		return -EACCES;
++		return -EOPNOTSUPP;
+
+ 	error = try_break_deleg(dir, LEASE_BREAK_DIR_CREATE, di);
+ 	if (error)
+@@ -4218,7 +4218,7 @@ struct dentry *vfs_mkdir_no_perm(const struct mnt_idmap *idmap, struct inode *di
+ 	int error;
+
+ 	if (!dir->i_op->mkdir)
+-		return ERR_PTR(-EPERM);
++		return ERR_PTR(-EOPNOTSUPP);
+
+ 	if (max_links && dir->i_nlink >= max_links)
+ 		return ERR_PTR(-EMLINK);
+diff --git a/include/uapi/asm-generic/errno.h b/include/uapi/asm-generic/errno.h
+index c84ebf89c8b6e..bd78e69e0a43f 100644
+--- a/include/uapi/asm-generic/errno.h
++++ b/include/uapi/asm-generic/errno.h
+@@ -76,7 +76,7 @@
+ #define	ENOPROTOOPT	92	/* Protocol not available */
+ #define	EPROTONOSUPPORT	93	/* Protocol not supported */
+ #define	ESOCKTNOSUPPORT	94	/* Socket type not supported */
+-#define	EOPNOTSUPP	95	/* Operation not supported */
++#define	EOPNOTSUPP	95	/* Operation not supported on transport endpoint */
+ #define	EPFNOSUPPORT	96	/* Protocol family not supported */
+ #define	EAFNOSUPPORT	97	/* Address family not supported by protocol */
+ #define	EADDRINUSE	98	/* Address already in use */
+
+commit 40af997f65fef9d5bc30ecd409b16ac463c50827
+Author: Christian Brauner <brauner@kernel.org>
+Date:   Wed Nov 18 16:09:05 2026 +0100
+
+    fixup! vfs: change ->create/->mkdir operations unavailable errno
+
+    vfs_create() and vfs_mkdir() have their own checks again. Return
+    -EOPNOTSUPP from those as well.
+
+    Signed-off-by: Christian Brauner (Amutable) <brauner@kernel.org>
+
+diff --git a/fs/namei.c b/fs/namei.c
+index 2476f83fdf354..75facb4f80d88 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -4264,7 +4264,7 @@ int vfs_create(const struct mnt_idmap *idmap, struct dentry *dentry, umode_t mod
+ 		return error;
+
+ 	if (!dir->i_op->create)
+-		return -EACCES;	/* shouldn't it be ENOSYS? */
++		return -EOPNOTSUPP;
+
+ 	mode = vfs_prepare_mode(idmap, dir, mode, S_IALLUGO, S_IFREG);
+ 	error = security_inode_create(idmap, dir, dentry, mode);
+@@ -5486,7 +5486,7 @@ struct dentry *vfs_mkdir(const struct mnt_idmap *idmap, struct inode *dir,
+ 	if (error)
+ 		goto err;
+
+-	error = -EPERM;
++	error = -EOPNOTSUPP;
+ 	if (!dir->i_op->mkdir)
+ 		goto err;
