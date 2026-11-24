@@ -821,6 +821,9 @@ If this is set to non-zero, the OOM killer simply kills the task that
 triggered the out-of-memory condition.  This avoids the expensive
 tasklist scan.
 
+A task that is in the middle of a vfork() is an exception.  It runs on
+the memory of its parent, so the tasklist is scanned for it.
+
 If panic_on_oom is selected, it takes precedence over whatever value
 is used in oom_kill_allocating_task.
 
