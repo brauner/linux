@@ -187,6 +187,22 @@ static bool should_dump_unreclaim_slab(void)
 	return (global_node_page_state_pages(NR_SLAB_UNRECLAIMABLE_B) > nr_lru);
 }
 
+/*
+ * A vfork() child borrows the mm of the process that created it until it has
+ * switched to a new mm in exec or dropped the mm in exit. That process is
+ * woken up before that, so ->vfork_done can't tell.
+ *
+ * The child is only in vfork() for as long as the mm belongs to a process.
+ * That process is the one to score or to spare and killing it kills the
+ * child. It isn't necessarily the parent of the child (CLONE_PARENT). Once
+ * the last such process is gone the children are all that's left of the mm
+ * and count like any other process.
+ */
+static bool in_vfork(struct task_struct *tsk)
+{
+	return tsk->signal->vfork_child && atomic_read(&tsk->mm->mm_procs) > 0;
+}
+
 /**
  * oom_badness - heuristic function to determine which candidate task to kill
  * @p: task struct of which task we should calculate

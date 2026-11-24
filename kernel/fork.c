@@ -1093,6 +1093,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	mt_set_external_lock(&mm->mm_mt, &mm->mmap_lock);
 	atomic_set(&mm->mm_users, 1);
 	atomic_set(&mm->mm_count, 1);
+	atomic_set(&mm->mm_procs, 1);
 	seqcount_init(&mm->write_protect_seq);
 	mmap_init_lock(mm);
 	INIT_LIST_HEAD(&mm->mmlist);
@@ -1802,6 +1803,8 @@ static int copy_signal(u64 clone_flags, struct task_struct *tsk)
 
 	sig->oom_score_adj = current->signal->oom_score_adj;
 	sig->oom_score_adj_min = current->signal->oom_score_adj_min;
+	sig->vfork_child = (clone_flags & (CLONE_VM | CLONE_VFORK)) ==
+			   (CLONE_VM | CLONE_VFORK);
 
 	mutex_init(&sig->cred_guard_mutex);
 	init_rwsem(&sig->exec_update_lock);
@@ -1990,6 +1993,9 @@ static void copy_oom_score_adj(u64 clone_flags, struct task_struct *tsk)
 	/* Skip if spawning a thread or using vfork */
 	if ((clone_flags & (CLONE_VM | CLONE_THREAD | CLONE_VFORK)) != CLONE_VM)
 		return;
+
+	/* The mm belongs to the new process as well. */
+	atomic_inc(&tsk->mm->mm_procs);
 
 	/* We need to synchronize with __set_oom_adj */
 	mutex_lock(&oom_adj_mutex);

@@ -1409,6 +1409,15 @@ struct mm_struct {
 		/* See flush_tlb_batched_pending() */
 		atomic_t tlb_flush_batched;
 #endif
+		/**
+		 * @mm_procs: The number of processes this mm belongs to.
+		 *
+		 * That's every process that runs on it apart from a vfork()
+		 * child which only borrows the mm until it execs or exits. A
+		 * process isn't counted anymore once its last thread has
+		 * started to exit.
+		 */
+		atomic_t mm_procs;
 		struct uprobes_state uprobes_state;
 #ifdef CONFIG_PREEMPT_RT
 		struct rcu_head delayed_drop;

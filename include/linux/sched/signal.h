@@ -237,6 +237,12 @@ struct signal_struct {
 	 * oom
 	 */
 	bool oom_flag_origin;
+	/*
+	 * Created with CLONE_VM | CLONE_VFORK and not exec'ed yet: the process
+	 * runs on an mm it has borrowed. Set before the process is visible,
+	 * cleared together with the mm switch in exec_mmap() under task_lock().
+	 */
+	bool vfork_child;
 	short oom_score_adj;		/* OOM kill score adjustment */
 	short oom_score_adj_min;	/* OOM kill score adjustment min value.
 					 * Only settable by CAP_SYS_RESOURCE. */

@@ -1137,10 +1137,11 @@ static int __set_oom_adj(struct file *file, int oom_adj, bool legacy)
 
 	/*
 	 * Make sure we will check other processes sharing the mm if this is
-	 * not vfrok which wants its own oom_score_adj.
+	 * not vfork which wants its own oom_score_adj. A kernel thread only
+	 * borrows the mm it may be on.
 	 * pin the mm so it doesn't go away and get reused after task_unlock
 	 */
-	if (!task->vfork_done) {
+	if (!task->signal->vfork_child && !(task->flags & PF_KTHREAD)) {
 		struct task_struct *p = find_lock_task_mm(task);
 
 		if (p) {
@@ -1170,7 +1171,7 @@ static int __set_oom_adj(struct file *file, int oom_adj, bool legacy)
 				continue;
 
 			task_lock(p);
-			if (!p->vfork_done && process_shares_mm(p, mm)) {
+			if (!p->signal->vfork_child && process_shares_mm(p, mm)) {
 				p->signal->oom_score_adj = oom_adj;
 				if (!legacy && has_capability_noaudit(current, CAP_SYS_RESOURCE))
 					p->signal->oom_score_adj_min = (short)oom_adj;

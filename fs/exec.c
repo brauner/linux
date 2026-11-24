@@ -882,6 +882,11 @@ static int exec_mmap(struct linux_binprm *bprm)
 	active_mm = tsk->active_mm;
 	tsk->active_mm = mm;
 	tsk->mm = mm;
+	/* A vfork() child only borrowed the old mm and wasn't counted. */
+	if (tsk->signal->vfork_child)
+		tsk->signal->vfork_child = false;
+	else if (old_mm)
+		atomic_dec(&old_mm->mm_procs);
 	sched_cache_exec_mmap(tsk, mm);
 	mm_init_cid(mm, tsk);
 	exec_state = task_exec_state_replace(tsk, exec_state);

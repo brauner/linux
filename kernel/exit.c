@@ -934,8 +934,16 @@ void __noreturn do_exit(long code)
 			panic("Attempted to kill init! exitcode=0x%08x\n",
 				tsk->signal->group_exit_code ?: (int)code);
 
-		if (tsk->mm)
+		if (tsk->mm) {
 			setmax_mm_hiwater_rss(&tsk->signal->maxrss, tsk->mm);
+			/*
+			 * A vfork() child only borrowed its mm and so did a
+			 * kernel thread that dies in kthread_use_mm().
+			 */
+			if (!tsk->signal->vfork_child &&
+			    !(tsk->flags & PF_KTHREAD))
+				atomic_dec(&tsk->mm->mm_procs);
+		}
 	}
 
 	posixtimer_exit(group_dead);
