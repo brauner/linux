@@ -918,11 +918,13 @@ static bool task_will_free_mem(struct task_struct *task)
 	return ret;
 }
 
-static void __oom_kill_process(struct task_struct *victim, const char *message)
+static void __oom_kill_process(struct task_struct *victim, const char *message,
+			       bool member)
 {
 	struct task_struct *p;
 	struct mm_struct *mm;
 	bool can_oom_reap = true;
+	bool alone;
 
 	p = find_lock_task_mm(victim);
 	if (!p) {
@@ -940,9 +942,23 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 	mm = victim->mm;
 	mmgrab(mm);
 
+	/*
+	 * A vfork() child that is killed as a member of its oom group doesn't
+	 * stand for the mm it has borrowed. The process the mm belongs to may
+	 * have another oom_score_adj or be in another memory cgroup. So kill
+	 * the child and nobody else. The mm stays in use and must not be
+	 * reaped. And the child must not become an oom victim. Nobody would
+	 * set MMF_OOM_SKIP for the mm and the oom killer would wait for the
+	 * child for as long as it's around.
+	 */
+	alone = member && in_vfork(victim);
+
 	/* Raise event before sending signal: task reaper must see this */
 	count_vm_event(OOM_KILL);
-	memcg_memory_event_mm(mm, MEMCG_OOM_KILL);
+	if (alone)
+		memcg_memory_event_task(victim, MEMCG_OOM_KILL);
+	else
+		memcg_memory_event_mm(mm, MEMCG_OOM_KILL);
 
 	/*
 	 * We should send SIGKILL before granting access to memory reserves
@@ -950,7 +966,8 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 	 * reserves from the user space under its control.
 	 */
 	do_send_sig_info(SIGKILL, SEND_SIG_PRIV, victim, PIDTYPE_TGID);
-	mark_oom_victim(victim);
+	if (!alone)
+		mark_oom_victim(victim);
 	pr_err("%s: Killed process %d (%s) total-vm:%lukB, anon-rss:%lukB, file-rss:%lukB, shmem-rss:%lukB, UID:%u pgtables:%lukB oom_score_adj:%d\n",
 		message, task_pid_nr(victim), victim->comm, K(mm->total_vm),
 		K(get_mm_counter_sum(mm, MM_ANONPAGES)),
@@ -959,6 +976,9 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 		from_kuid(&init_user_ns, task_uid(victim)),
 		mm_pgtables_bytes(mm) >> 10, victim->signal->oom_score_adj);
 	task_unlock(victim);
+
+	if (alone)
+		goto out;
 
 	/*
 	 * Kill all user processes sharing victim->mm in other thread groups, if
@@ -996,6 +1016,7 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 	if (can_oom_reap)
 		queue_oom_reaper(victim);
 
+out:
 	mmdrop(mm);
 	put_task_struct(victim);
 }
@@ -1009,7 +1030,7 @@ static int oom_kill_memcg_member(struct task_struct *task, void *message)
 	if (task->signal->oom_score_adj != OOM_SCORE_ADJ_MIN &&
 	    !is_global_init(task)) {
 		get_task_struct(task);
-		__oom_kill_process(task, message);
+		__oom_kill_process(task, message, true);
 	}
 	return 0;
 }
@@ -1048,7 +1069,7 @@ static void oom_kill_process(struct oom_control *oc, const char *message)
 	 */
 	oom_group = mem_cgroup_get_oom_group(victim, oc->memcg);
 
-	__oom_kill_process(victim, message);
+	__oom_kill_process(victim, message, false);
 
 	/*
 	 * If necessary, kill all tasks in the selected memory cgroup.

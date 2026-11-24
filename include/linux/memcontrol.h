@@ -1054,6 +1054,17 @@ static inline void memcg_memory_event_mm(struct mm_struct *mm,
 	rcu_read_unlock();
 }
 
+static inline void memcg_memory_event_task(struct task_struct *task,
+					   enum memcg_memory_event event)
+{
+	if (mem_cgroup_disabled())
+		return;
+
+	rcu_read_lock();
+	memcg_memory_event(mem_cgroup_from_task(task), event);
+	rcu_read_unlock();
+}
+
 void split_page_memcg(struct page *first, unsigned order);
 void folio_split_memcg_refs(struct folio *folio, unsigned old_order,
 		unsigned new_order);
@@ -1151,6 +1162,11 @@ static inline void memcg_memory_event(struct mem_cgroup *memcg,
 
 static inline void memcg_memory_event_mm(struct mm_struct *mm,
 					 enum memcg_memory_event event)
+{
+}
+
+static inline void memcg_memory_event_task(struct task_struct *task,
+					   enum memcg_memory_event event)
 {
 }
 
