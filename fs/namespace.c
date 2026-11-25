@@ -2561,6 +2561,31 @@ int count_mounts(struct mnt_namespace *ns, struct mount *mnt)
 	return 0;
 }
 
+/*
+ * Will the mountpoint for the root of @source_mnt be used? It is if a mount
+ * is already where @source_mnt or a copy on @tree_list goes. Copies use
+ * @shorter instead if there is one.
+ */
+static bool need_root_mountpoint(struct mount *source_mnt,
+				 const struct pinned_mountpoint *dest,
+				 struct hlist_head *tree_list,
+				 struct mountpoint *shorter)
+{
+	struct mount *child, *q;
+
+	if (__lookup_mnt(&dest->parent->mnt, dest->mp->m_dentry))
+		return true;
+	if (shorter)
+		return false;
+	hlist_for_each_entry(child, tree_list, mnt_hash) {
+		q = __lookup_mnt(&child->mnt_parent->mnt, child->mnt_mountpoint);
+		/* a moved @source_mnt is gone from there by then */
+		if (q && q != source_mnt)
+			return true;
+	}
+	return false;
+}
+
 enum mnt_tree_flags_t {
 	MNT_TREE_BENEATH = BIT(0),
 	MNT_TREE_PROPAGATION = BIT(1),
@@ -2691,6 +2716,13 @@ static int attach_recursive_mnt(struct mount *source_mnt,
 		err = propagate_mnt(dest_mnt, dest_mp, source_mnt, &tree_list);
 	}
 	lock_mount_hash();
+	/*
+	 * Don't mount on top of a root that dont_mount() was called on. It's
+	 * a mountpoint now so a later detach_mounts() will find it.
+	 */
+	if (!err && unlikely(cant_mount(root.mp->m_dentry)) &&
+	    need_root_mountpoint(source_mnt, dest, &tree_list, shorter))
+		err = -ENOENT;
 	if (err)
 		goto out_cleanup_ids;
 
